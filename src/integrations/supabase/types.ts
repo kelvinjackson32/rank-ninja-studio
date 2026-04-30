@@ -14,7 +14,137 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      api_keys: {
+        Row: {
+          actor_id: string | null
+          api_key: string
+          created_at: string
+          error_message: string | null
+          id: string
+          last_used_at: string | null
+          name: string
+          status: string
+          user_id: string
+        }
+        Insert: {
+          actor_id?: string | null
+          api_key: string
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          last_used_at?: string | null
+          name: string
+          status?: string
+          user_id: string
+        }
+        Update: {
+          actor_id?: string | null
+          api_key?: string
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          last_used_at?: string | null
+          name?: string
+          status?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      profiles: {
+        Row: {
+          created_at: string
+          display_name: string | null
+          id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          display_name?: string | null
+          id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          display_name?: string | null
+          id?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      projects: {
+        Row: {
+          created_at: string
+          id: string
+          niche: string
+          progress_log: Json | null
+          secondary_keywords: string[] | null
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          niche: string
+          progress_log?: Json | null
+          secondary_keywords?: string[] | null
+          status?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          niche?: string
+          progress_log?: Json | null
+          secondary_keywords?: string[] | null
+          status?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      research_results: {
+        Row: {
+          created_at: string
+          gig_optimization: Json | null
+          id: string
+          insights: Json | null
+          profile_optimization: Json | null
+          project_id: string
+          scraped_data: Json | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          gig_optimization?: Json | null
+          id?: string
+          insights?: Json | null
+          profile_optimization?: Json | null
+          project_id: string
+          scraped_data?: Json | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          gig_optimization?: Json | null
+          id?: string
+          insights?: Json | null
+          profile_optimization?: Json | null
+          project_id?: string
+          scraped_data?: Json | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "research_results_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
