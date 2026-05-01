@@ -361,11 +361,143 @@ const RegenButton = ({ resultId, section, fieldKey, onUpdate }: any) => {
   );
 };
 
+const ProfileStrengthCard = ({ strength }: any) => {
+  if (!strength) return null;
+  const s = strength.score ?? 0;
+  const color = s >= 80 ? "text-success" : s >= 60 ? "text-warning" : "text-destructive";
+  const bar = s >= 80 ? "bg-success" : s >= 60 ? "bg-warning" : "bg-destructive";
+  return (
+    <div className="surface-card rounded-lg p-5 border-primary/30">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <Gauge className="w-4 h-4 text-primary" />
+          <h3 className="font-semibold text-sm uppercase tracking-wider font-mono text-primary">Profile Strength</h3>
+        </div>
+        <div className={`text-3xl font-mono font-bold ${color}`}>{s}<span className="text-base text-muted-foreground">/100</span></div>
+      </div>
+      <div className="w-full h-2 rounded-full bg-muted/40 overflow-hidden mb-4">
+        <div className={`h-full ${bar} transition-all`} style={{ width: `${Math.min(100, Math.max(0, s))}%` }} />
+      </div>
+      {strength.breakdown && (
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-4">
+          {Object.entries(strength.breakdown).map(([k, v]: any) => (
+            <div key={k} className="rounded-md bg-muted/30 p-2 text-center">
+              <div className="text-[10px] uppercase tracking-wider font-mono text-muted-foreground truncate">{k.replace(/_/g, " ")}</div>
+              <div className="font-mono font-bold text-sm mt-1">{v}/20</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {strength.tips?.length > 0 && (
+        <ul className="space-y-2 text-sm">
+          {strength.tips.map((t: string, i: number) => (
+            <li key={i} className="flex gap-2"><span className="text-primary shrink-0">→</span>{t}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+};
+
+const TitleVariationsView = ({ gig, copy }: any) => {
+  const variations = gig?.title_variations || [];
+  if (variations.length === 0) return <div className="surface-card rounded-lg p-8 text-center text-muted-foreground">No title variations yet. Re-run research to generate them.</div>;
+  return (
+    <div className="space-y-3">
+      <div className="surface-card rounded-lg p-5 bg-primary/5 border-primary/30">
+        <div className="flex items-center gap-2 mb-1">
+          <Type className="w-4 h-4 text-primary" />
+          <h3 className="font-semibold text-sm uppercase tracking-wider font-mono text-primary">{variations.length} competitive title angles</h3>
+        </div>
+        <p className="text-sm text-muted-foreground">Each one models a real winning pattern from your scraped top sellers. Pick the angle that fits your style.</p>
+      </div>
+      {variations.map((v: any, i: number) => {
+        const len = (v.title || "").length;
+        const over = len > 80;
+        return (
+          <div key={i} className="surface-card rounded-lg p-5">
+            <div className="flex items-start justify-between gap-3 mb-2">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 mb-1 flex-wrap">
+                  <span className="font-mono text-xs text-primary">#{String(i + 1).padStart(2, "0")}</span>
+                  {v.angle && <Badge variant="outline" className="font-mono text-[10px]">{v.angle}</Badge>}
+                </div>
+                <div className="font-bold text-base break-words">{v.title}</div>
+              </div>
+              <Button size="icon" variant="ghost" onClick={() => copy(v.title)}><Copy className="w-4 h-4" /></Button>
+            </div>
+            {v.why_it_works && <div className="text-sm text-muted-foreground mt-2 border-l-2 border-primary/40 pl-3">{v.why_it_works}</div>}
+            <div className={`text-xs font-mono mt-2 ${over ? "text-destructive" : "text-muted-foreground"}`}>{len}/80 chars{over ? " — exceeds Fiverr limit" : ""}</div>
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
+const KeywordsView = ({ insights, copy }: any) => {
+  const top = insights?.top_keywords || [];
+  const expansion = insights?.keyword_expansion || [];
+  if (top.length === 0 && expansion.length === 0) return <div className="surface-card rounded-lg p-8 text-center text-muted-foreground">No keyword data.</div>;
+  return (
+    <>
+      <div className="surface-card rounded-lg p-5">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-semibold text-sm uppercase tracking-wider font-mono text-muted-foreground">Top Ranking Keywords</h3>
+          <Button size="icon" variant="ghost" onClick={() => copy(top.join(", "))}><Copy className="w-4 h-4" /></Button>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {top.map((k: string) => <Badge key={k} variant="outline" className="font-mono bg-primary/5 border-primary/30 text-primary">{k}</Badge>)}
+        </div>
+      </div>
+      <div className="surface-card rounded-lg p-5 border-secondary/30">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-semibold text-sm uppercase tracking-wider font-mono text-secondary">Keyword Expansion (long-tail / lower competition)</h3>
+          <Button size="icon" variant="ghost" onClick={() => copy(expansion.join(", "))}><Copy className="w-4 h-4" /></Button>
+        </div>
+        <p className="text-xs text-muted-foreground mb-3">Use these as secondary keywords or to spawn additional gigs.</p>
+        <div className="flex flex-wrap gap-2">
+          {expansion.map((k: string) => <Badge key={k} className="bg-secondary/10 text-secondary border-secondary/30">{k}</Badge>)}
+        </div>
+      </div>
+    </>
+  );
+};
+
+const ThumbnailsView = ({ gig, copy }: any) => {
+  const prompts = gig?.thumbnail_prompts || [];
+  if (prompts.length === 0) return <div className="surface-card rounded-lg p-8 text-center text-muted-foreground">No thumbnail prompts yet. Re-run research to generate them.</div>;
+  return (
+    <div className="space-y-4">
+      <div className="surface-card rounded-lg p-5 bg-primary/5 border-primary/30">
+        <div className="flex items-center gap-2 mb-1">
+          <ImageIcon className="w-4 h-4 text-primary" />
+          <h3 className="font-semibold text-sm uppercase tracking-wider font-mono text-primary">Thumbnail prompts for Midjourney / Flux</h3>
+        </div>
+        <p className="text-sm text-muted-foreground">Paste any prompt into your image generator to produce gallery-ready Fiverr thumbnails.</p>
+      </div>
+      {prompts.map((p: any, i: number) => (
+        <div key={i} className="surface-card rounded-lg p-5">
+          <div className="flex items-start justify-between gap-3 mb-2">
+            <div>
+              <span className="font-mono text-xs text-primary">#{i + 1}</span>
+              <div className="font-bold mt-1">{p.style}</div>
+            </div>
+            <Button size="sm" variant="outline" onClick={() => copy(p.prompt)}><Copy className="w-4 h-4 mr-1" />Copy</Button>
+          </div>
+          <pre className="text-xs font-mono whitespace-pre-wrap bg-background/60 rounded-md p-3 mt-2 leading-relaxed">{p.prompt}</pre>
+        </div>
+      ))}
+    </div>
+  );
+};
+
 const ProfileView = ({ profile, resultId, onUpdate, copy }: any) => {
   if (!profile) return null;
   const f = (label: string, key: string, multi = false) => <Field label={label} value={profile[key]} resultId={resultId} section="profile" fieldKey={key} onUpdate={onUpdate} copy={copy} multiline={multi} />;
   return (
     <>
+      <ProfileStrengthCard strength={profile.profile_strength} />
       {f("Display Name", "display_name")}
       {f("Profile Title", "profile_title")}
       {profile.short_bio !== undefined && f("Short Bio (≤150 chars)", "short_bio", true)}
