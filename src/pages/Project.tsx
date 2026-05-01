@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, Copy, Loader2, Sparkles, RefreshCw, Tag, MessageSquare, Package, User, Download, Trophy, Lightbulb, Star, RotateCw } from "lucide-react";
+import { ArrowLeft, Copy, Loader2, Sparkles, RefreshCw, Tag, MessageSquare, Package, User, Download, Trophy, Lightbulb, Star, RotateCw, Image as ImageIcon, Type, Search, Gauge } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
@@ -136,8 +136,11 @@ const Project = () => {
             <TabsList className="bg-muted/40 border border-border flex-wrap h-auto">
               <TabsTrigger value="insights"><Sparkles className="w-4 h-4 mr-1" />Insights</TabsTrigger>
               <TabsTrigger value="sellers"><Trophy className="w-4 h-4 mr-1" />Top Sellers</TabsTrigger>
+              <TabsTrigger value="titles"><Type className="w-4 h-4 mr-1" />Titles</TabsTrigger>
+              <TabsTrigger value="keywords"><Search className="w-4 h-4 mr-1" />Keywords</TabsTrigger>
               <TabsTrigger value="profile"><User className="w-4 h-4 mr-1" />Profile</TabsTrigger>
               <TabsTrigger value="gig"><Package className="w-4 h-4 mr-1" />Gig</TabsTrigger>
+              <TabsTrigger value="thumbnails"><ImageIcon className="w-4 h-4 mr-1" />Thumbnails</TabsTrigger>
             </TabsList>
 
             <TabsContent value="insights" className="mt-6 space-y-4">
@@ -148,12 +151,24 @@ const Project = () => {
               <TopSellersView insights={result.insights} />
             </TabsContent>
 
+            <TabsContent value="titles" className="mt-6 space-y-4">
+              <TitleVariationsView gig={result.gig_optimization} copy={copy} />
+            </TabsContent>
+
+            <TabsContent value="keywords" className="mt-6 space-y-4">
+              <KeywordsView insights={result.insights} copy={copy} />
+            </TabsContent>
+
             <TabsContent value="profile" className="mt-6 space-y-4">
               <ProfileView profile={result.profile_optimization} resultId={result.id} onUpdate={load} copy={copy} />
             </TabsContent>
 
             <TabsContent value="gig" className="mt-6 space-y-4">
               <GigView gig={result.gig_optimization} resultId={result.id} onUpdate={load} copy={copy} />
+            </TabsContent>
+
+            <TabsContent value="thumbnails" className="mt-6 space-y-4">
+              <ThumbnailsView gig={result.gig_optimization} copy={copy} />
             </TabsContent>
           </Tabs>
         )}
