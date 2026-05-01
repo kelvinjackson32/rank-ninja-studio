@@ -94,9 +94,10 @@ Deno.serve(async (req) => {
     for (const q of queries) {
       await appendLog(admin, projectId, `🌐 Scraping Fiverr for: "${q}"`);
       let success = false;
+      let lastError = "";
       for (const key of keys) {
         if (key.status === "rate_limited") continue;
-        const actorId = key.actor_id || "epctex/fiverr-scraper";
+        const actorId = key.actor_id || "piotrv1001/fiverr-listings-scraper";
         try {
           await appendLog(admin, projectId, `   → Using key "${key.name}" (actor: ${actorId})`);
           const items = await runApifyActor(key.api_key, actorId, {
@@ -112,11 +113,12 @@ Deno.serve(async (req) => {
           break;
         } catch (e: any) {
           const status = e.status === 429 ? "rate_limited" : "error";
-          await admin.from("api_keys").update({ status, error_message: e.message?.slice(0, 200) }).eq("id", key.id);
-          await appendLog(admin, projectId, `   ⚠ Key "${key.name}" failed (${e.message?.slice(0, 80)}). Rotating...`);
+          lastError = e.message || String(e);
+          await admin.from("api_keys").update({ status, error_message: lastError.slice(0, 200) }).eq("id", key.id);
+          await appendLog(admin, projectId, `   ⚠ Key "${key.name}" failed: ${lastError.slice(0, 160)}`);
         }
       }
-      if (!success) throw new Error(`All API keys failed for query "${q}". Check Settings.`);
+      if (!success) throw new Error(`Scraping failed for "${q}". Last error: ${lastError || "no active keys"}. If the actor ID is invalid, update it in Settings (try "piotrv1001/fiverr-listings-scraper").`);
     }
 
     await appendLog(admin, projectId, `📊 Analyzed ${allItems.length} gigs total. Generating intelligence...`);

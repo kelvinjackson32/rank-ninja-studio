@@ -18,7 +18,7 @@ const Settings = () => {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [apiKey, setApiKey] = useState("");
-  const [actorId, setActorId] = useState("epctex/fiverr-scraper");
+  const [actorId, setActorId] = useState("piotrv1001/fiverr-listings-scraper");
 
   const load = async () => {
     const { data } = await supabase.from("api_keys").select("*").order("created_at", { ascending: false });
@@ -31,7 +31,7 @@ const Settings = () => {
     const { error } = await supabase.from("api_keys").insert({ user_id: user!.id, name: name.trim(), api_key: apiKey.trim(), actor_id: actorId.trim() || null, status: "active" });
     if (error) { toast.error(error.message); return; }
     toast.success("Key added");
-    setName(""); setApiKey(""); setActorId("epctex/fiverr-scraper");
+    setName(""); setApiKey(""); setActorId("piotrv1001/fiverr-listings-scraper");
     setOpen(false); load();
   };
 
@@ -78,7 +78,7 @@ const Settings = () => {
                 <div>
                   <Label className="font-mono text-xs uppercase tracking-wider">Actor ID</Label>
                   <Input value={actorId} onChange={(e) => setActorId(e.target.value)} placeholder="username/actor-name" className="mt-1.5 font-mono bg-input/50" />
-                  <p className="text-xs text-muted-foreground mt-1.5">Fiverr scraper actor. Default: <code className="text-primary">epctex/fiverr-scraper</code></p>
+                  <p className="text-xs text-muted-foreground mt-1.5">Fiverr scraper actor. Default: <code className="text-primary">piotrv1001/fiverr-listings-scraper</code></p>
                 </div>
                 <Button onClick={add} className="w-full bg-gradient-to-r from-primary to-secondary text-primary-foreground">Save Key</Button>
               </div>
@@ -100,7 +100,7 @@ const Settings = () => {
                   <div className="flex-1 min-w-0">
                     <div className="font-medium">{k.name}</div>
                     <div className="text-xs font-mono text-muted-foreground truncate">
-                      {k.api_key.slice(0, 8)}••••{k.api_key.slice(-4)} · {k.actor_id || "epctex/fiverr-scraper"}
+                      {k.api_key.slice(0, 8)}••••{k.api_key.slice(-4)} · {k.actor_id || "piotrv1001/fiverr-listings-scraper"}
                     </div>
                     {k.error_message && <div className="text-xs text-destructive mt-1 truncate">{k.error_message}</div>}
                   </div>
