@@ -94,9 +94,10 @@ Deno.serve(async (req) => {
     for (const q of queries) {
       await appendLog(admin, projectId, `🌐 Scraping Fiverr for: "${q}"`);
       let success = false;
+      let lastError = "";
       for (const key of keys) {
         if (key.status === "rate_limited") continue;
-        const actorId = key.actor_id || "epctex/fiverr-scraper";
+        const actorId = key.actor_id || "piotrv1001/fiverr-listings-scraper";
         try {
           await appendLog(admin, projectId, `   → Using key "${key.name}" (actor: ${actorId})`);
           const items = await runApifyActor(key.api_key, actorId, {
