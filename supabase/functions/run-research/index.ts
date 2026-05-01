@@ -177,15 +177,18 @@ Deno.serve(async (req) => {
             projectId,
             `   → Using key "${key.name}" (actor: ${actorId})`,
           );
-          const searchUrl = `https://www.fiverr.com/search/gigs?query=${encodeURIComponent(q)}`;
+          // Scrape pages 1, 2, 3 explicitly
+          const pageUrls = [1, 2, 3].map((page) =>
+            `https://www.fiverr.com/search/gigs?query=${encodeURIComponent(q)}&page=${page}`,
+          );
           const items = await runApifyActor(key.api_key, actorId, {
             // piotrv1001/fiverr-listings-scraper expects `searchUrls` as string URLs.
-            searchUrls: [searchUrl],
-            maxItemsPerUrl: 30,
+            searchUrls: pageUrls,
+            maxItemsPerUrl: 48,
             // Compatibility with other community actors (epctex, etc.)
-            startUrls: [{ url: searchUrl }],
+            startUrls: pageUrls.map((url) => ({ url })),
             search: q,
-            maxItems: 30,
+            maxItems: 144,
             maxPages: 3,
           });
           await admin
