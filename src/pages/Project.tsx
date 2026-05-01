@@ -610,10 +610,24 @@ function buildMarkdown(project: any, result: any): string {
   lines.push(`- **Display name:** ${p.display_name}`);
   lines.push(`- **Profile title:** ${p.profile_title}`);
   if (p.short_bio) lines.push(`- **Short bio (${p.short_bio.length}/150):** ${p.short_bio}`);
+  if (p.profile_strength?.score != null) {
+    lines.push(`- **Profile strength:** ${p.profile_strength.score}/100`);
+    if (p.profile_strength.tips?.length) {
+      lines.push(`  - Tips:`);
+      p.profile_strength.tips.forEach((t: string) => lines.push(`    - ${t}`));
+    }
+  }
   lines.push(`\n**About:**\n${p.about}\n`);
   if (p.skills?.length) lines.push(`**Skills:** ${p.skills.join(", ")}\n`);
   lines.push(`## Gig`);
   lines.push(`- **Title (${(g.gig_title || "").length}/80):** ${g.gig_title}`);
+  if (g.title_variations?.length) {
+    lines.push(`\n### Title Variations`);
+    g.title_variations.forEach((v: any, n: number) => {
+      lines.push(`${n + 1}. **${v.title}** _(${v.angle})_ — ${v.why_it_works}`);
+    });
+    lines.push("");
+  }
   if (g.search_tags?.length) lines.push(`- **Tags:** ${g.search_tags.join(", ")}`);
   lines.push(`\n**Description (${(g.description || "").length}/1200):**\n${g.description}\n`);
   if (g.faqs?.length) {
