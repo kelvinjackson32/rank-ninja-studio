@@ -185,7 +185,7 @@ async function runResearchWork(admin: any, userId: string, projectId: string, pr
     const { data: keys } = await admin
       .from("api_keys")
       .select("*")
-      .eq("user_id", user.id)
+      .eq("user_id", userId)
       .order("status")
       .order("last_used_at", { ascending: true, nullsFirst: true });
     if (!keys || keys.length === 0)
@@ -394,7 +394,7 @@ REQUIREMENTS:
 
     await admin.from("research_results").insert({
       project_id: projectId,
-      user_id: user.id,
+      user_id: userId,
       scraped_data: { count: allItems.length, sample: compacted },
       insights,
       profile_optimization,
@@ -410,25 +410,5 @@ REQUIREMENTS:
       projectId,
       `✅ Done! Open the results to view your competitive blueprint.`,
     );
+}
 
-    return new Response(JSON.stringify({ success: true }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  } catch (e: any) {
-    console.error("run-research error:", e);
-    try {
-      const body = await req.clone().json();
-      if (body.projectId) {
-        await admin
-          .from("projects")
-          .update({ status: "error" })
-          .eq("id", body.projectId);
-        await appendLog(admin, body.projectId, `❌ ${e.message}`);
-      }
-    } catch {}
-    return new Response(JSON.stringify({ error: e.message }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
-});
