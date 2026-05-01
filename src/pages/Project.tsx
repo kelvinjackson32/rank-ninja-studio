@@ -643,6 +643,12 @@ function buildMarkdown(project: any, result: any): string {
       (pk.features || []).forEach((f: string) => lines.push(`  - ${f}`));
     });
   }
+  if (g.thumbnail_prompts?.length) {
+    lines.push(`\n## Thumbnail Prompts (Midjourney / Flux)`);
+    g.thumbnail_prompts.forEach((tp: any, n: number) => {
+      lines.push(`\n### ${n + 1}. ${tp.style}\n\n\`\`\`\n${tp.prompt}\n\`\`\``);
+    });
+  }
   return lines.join("\n");
 }
 
