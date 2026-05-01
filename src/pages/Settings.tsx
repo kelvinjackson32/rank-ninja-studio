@@ -17,6 +17,9 @@ const Settings = () => {
   const { user } = useAuth();
   const [keys, setKeys] = useState<Key[]>([]);
   const [open, setOpen] = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkText, setBulkText] = useState("");
+  const [bulkActor, setBulkActor] = useState("piotrv1001/fiverr-listings-scraper");
   const [name, setName] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [actorId, setActorId] = useState("piotrv1001/fiverr-listings-scraper");
@@ -34,6 +37,20 @@ const Settings = () => {
     toast.success("Key added");
     setName(""); setApiKey(""); setActorId("piotrv1001/fiverr-listings-scraper");
     setOpen(false); load();
+  };
+
+  const addBulk = async () => {
+    const lines = bulkText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    if (lines.length === 0) { toast.error("Paste at least one key"); return; }
+    const rows = lines.map((line, i) => {
+      const m = line.match(/^([^:,]+)[:,]\s*(.+)$/);
+      const [n, k] = m ? [m[1].trim(), m[2].trim()] : [`Key ${i + 1}`, line];
+      return { user_id: user!.id, name: n, api_key: k, actor_id: bulkActor.trim() || null, status: "active" };
+    });
+    const { error } = await supabase.from("api_keys").insert(rows);
+    if (error) { toast.error(error.message); return; }
+    toast.success(`Added ${rows.length} key${rows.length > 1 ? "s" : ""}`);
+    setBulkText(""); setBulkOpen(false); load();
   };
 
   const remove = async (id: string) => {
