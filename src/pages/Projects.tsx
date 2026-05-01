@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { Plus, Loader2, CheckCircle2, AlertCircle, Clock, Search, Trash2, Pencil } from "lucide-react";
+import { Plus, Loader2, CheckCircle2, AlertCircle, Clock, Search, Trash2, Pencil, Layers } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
@@ -69,6 +69,11 @@ const Projects = () => {
                   <div className="text-xs text-muted-foreground font-mono">{new Date(p.created_at).toLocaleString()} · {p.status}</div>
                 </div>
               </Link>
+              {p.bulk_group_id && (
+                <Link to={`/app/compare/${p.bulk_group_id}`} className="text-xs text-primary hover:underline inline-flex items-center gap-1 font-mono">
+                  <Layers className="w-3 h-3" />Compare
+                </Link>
+              )}
               <RenameDialog project={p} onRename={rename} />
               <AlertDialog>
                 <AlertDialogTrigger asChild>

@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import { Plus, Trash2, KeyRound, CheckCircle2, AlertCircle, Pause } from "lucide-react";
+import { Plus, Trash2, KeyRound, CheckCircle2, AlertCircle, Pause, ClipboardPaste } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -16,6 +17,9 @@ const Settings = () => {
   const { user } = useAuth();
   const [keys, setKeys] = useState<Key[]>([]);
   const [open, setOpen] = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkText, setBulkText] = useState("");
+  const [bulkActor, setBulkActor] = useState("piotrv1001/fiverr-listings-scraper");
   const [name, setName] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [actorId, setActorId] = useState("piotrv1001/fiverr-listings-scraper");
@@ -33,6 +37,20 @@ const Settings = () => {
     toast.success("Key added");
     setName(""); setApiKey(""); setActorId("piotrv1001/fiverr-listings-scraper");
     setOpen(false); load();
+  };
+
+  const addBulk = async () => {
+    const lines = bulkText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    if (lines.length === 0) { toast.error("Paste at least one key"); return; }
+    const rows = lines.map((line, i) => {
+      const m = line.match(/^([^:,]+)[:,]\s*(.+)$/);
+      const [n, k] = m ? [m[1].trim(), m[2].trim()] : [`Key ${i + 1}`, line];
+      return { user_id: user!.id, name: n, api_key: k, actor_id: bulkActor.trim() || null, status: "active" };
+    });
+    const { error } = await supabase.from("api_keys").insert(rows);
+    if (error) { toast.error(error.message); return; }
+    toast.success(`Added ${rows.length} key${rows.length > 1 ? "s" : ""}`);
+    setBulkText(""); setBulkOpen(false); load();
   };
 
   const remove = async (id: string) => {
@@ -60,30 +78,49 @@ const Settings = () => {
             <h1 className="text-3xl font-bold tracking-tight">Apify API Keys</h1>
             <p className="text-muted-foreground text-sm mt-1">Add unlimited keys. RankForge auto-rotates on rate limits.</p>
           </div>
-          <Dialog open={open} onOpenChange={setOpen}>
-            <DialogTrigger asChild>
-              <Button className="bg-gradient-to-r from-primary to-secondary text-primary-foreground hover:opacity-90"><Plus className="w-4 h-4 mr-1" />Add Key</Button>
-            </DialogTrigger>
-            <DialogContent className="surface-card">
-              <DialogHeader><DialogTitle>Add Apify API Key</DialogTitle></DialogHeader>
-              <div className="space-y-4 pt-2">
-                <div>
-                  <Label className="font-mono text-xs uppercase tracking-wider">Label</Label>
-                  <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="My Apify account" className="mt-1.5 font-mono bg-input/50" />
+          <div className="flex gap-2">
+            <Dialog open={bulkOpen} onOpenChange={setBulkOpen}>
+              <DialogTrigger asChild>
+                <Button variant="outline"><ClipboardPaste className="w-4 h-4 mr-1" />Bulk Add</Button>
+              </DialogTrigger>
+              <DialogContent className="surface-card">
+                <DialogHeader><DialogTitle>Paste multiple API keys</DialogTitle></DialogHeader>
+                <div className="space-y-3 pt-2">
+                  <p className="text-xs text-muted-foreground">One per line. Format: <code className="text-primary">name:apify_api_xxx</code> or just <code className="text-primary">apify_api_xxx</code>.</p>
+                  <Textarea value={bulkText} onChange={(e) => setBulkText(e.target.value)} rows={8} placeholder={"Account 1:apify_api_xxxxxxxxxx\nAccount 2:apify_api_yyyyyyyyyy\napify_api_zzzzzzzzzz"} className="font-mono bg-input/50 text-xs" />
+                  <div>
+                    <Label className="font-mono text-xs uppercase tracking-wider">Actor ID (applies to all)</Label>
+                    <Input value={bulkActor} onChange={(e) => setBulkActor(e.target.value)} className="mt-1.5 font-mono bg-input/50" />
+                  </div>
+                  <Button onClick={addBulk} className="w-full bg-gradient-to-r from-primary to-secondary text-primary-foreground">Save All</Button>
                 </div>
-                <div>
-                  <Label className="font-mono text-xs uppercase tracking-wider">API Token</Label>
-                  <Input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="apify_api_..." className="mt-1.5 font-mono bg-input/50" />
+              </DialogContent>
+            </Dialog>
+            <Dialog open={open} onOpenChange={setOpen}>
+              <DialogTrigger asChild>
+                <Button className="bg-gradient-to-r from-primary to-secondary text-primary-foreground hover:opacity-90"><Plus className="w-4 h-4 mr-1" />Add Key</Button>
+              </DialogTrigger>
+              <DialogContent className="surface-card">
+                <DialogHeader><DialogTitle>Add Apify API Key</DialogTitle></DialogHeader>
+                <div className="space-y-4 pt-2">
+                  <div>
+                    <Label className="font-mono text-xs uppercase tracking-wider">Label</Label>
+                    <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="My Apify account" className="mt-1.5 font-mono bg-input/50" />
+                  </div>
+                  <div>
+                    <Label className="font-mono text-xs uppercase tracking-wider">API Token</Label>
+                    <Input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="apify_api_..." className="mt-1.5 font-mono bg-input/50" />
+                  </div>
+                  <div>
+                    <Label className="font-mono text-xs uppercase tracking-wider">Actor ID</Label>
+                    <Input value={actorId} onChange={(e) => setActorId(e.target.value)} placeholder="username/actor-name" className="mt-1.5 font-mono bg-input/50" />
+                    <p className="text-xs text-muted-foreground mt-1.5">Fiverr scraper actor. Default: <code className="text-primary">piotrv1001/fiverr-listings-scraper</code></p>
+                  </div>
+                  <Button onClick={add} className="w-full bg-gradient-to-r from-primary to-secondary text-primary-foreground">Save Key</Button>
                 </div>
-                <div>
-                  <Label className="font-mono text-xs uppercase tracking-wider">Actor ID</Label>
-                  <Input value={actorId} onChange={(e) => setActorId(e.target.value)} placeholder="username/actor-name" className="mt-1.5 font-mono bg-input/50" />
-                  <p className="text-xs text-muted-foreground mt-1.5">Fiverr scraper actor. Default: <code className="text-primary">piotrv1001/fiverr-listings-scraper</code></p>
-                </div>
-                <Button onClick={add} className="w-full bg-gradient-to-r from-primary to-secondary text-primary-foreground">Save Key</Button>
-              </div>
-            </DialogContent>
-          </Dialog>
+              </DialogContent>
+            </Dialog>
+          </div>
         </div>
 
         <div className="surface-card rounded-xl overflow-hidden">

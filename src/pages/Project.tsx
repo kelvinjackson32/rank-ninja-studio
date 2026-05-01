@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, Copy, Loader2, Sparkles, RefreshCw, Tag, MessageSquare, Package, User, Download, Trophy, Lightbulb, Star, RotateCw } from "lucide-react";
+import { ArrowLeft, Copy, Loader2, Sparkles, RefreshCw, Tag, MessageSquare, Package, User, Download, Trophy, Lightbulb, Star, RotateCw, Image as ImageIcon, Type, Search, Gauge } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
@@ -136,8 +136,11 @@ const Project = () => {
             <TabsList className="bg-muted/40 border border-border flex-wrap h-auto">
               <TabsTrigger value="insights"><Sparkles className="w-4 h-4 mr-1" />Insights</TabsTrigger>
               <TabsTrigger value="sellers"><Trophy className="w-4 h-4 mr-1" />Top Sellers</TabsTrigger>
+              <TabsTrigger value="titles"><Type className="w-4 h-4 mr-1" />Titles</TabsTrigger>
+              <TabsTrigger value="keywords"><Search className="w-4 h-4 mr-1" />Keywords</TabsTrigger>
               <TabsTrigger value="profile"><User className="w-4 h-4 mr-1" />Profile</TabsTrigger>
               <TabsTrigger value="gig"><Package className="w-4 h-4 mr-1" />Gig</TabsTrigger>
+              <TabsTrigger value="thumbnails"><ImageIcon className="w-4 h-4 mr-1" />Thumbnails</TabsTrigger>
             </TabsList>
 
             <TabsContent value="insights" className="mt-6 space-y-4">
@@ -148,12 +151,24 @@ const Project = () => {
               <TopSellersView insights={result.insights} />
             </TabsContent>
 
+            <TabsContent value="titles" className="mt-6 space-y-4">
+              <TitleVariationsView gig={result.gig_optimization} copy={copy} />
+            </TabsContent>
+
+            <TabsContent value="keywords" className="mt-6 space-y-4">
+              <KeywordsView insights={result.insights} copy={copy} />
+            </TabsContent>
+
             <TabsContent value="profile" className="mt-6 space-y-4">
               <ProfileView profile={result.profile_optimization} resultId={result.id} onUpdate={load} copy={copy} />
             </TabsContent>
 
             <TabsContent value="gig" className="mt-6 space-y-4">
               <GigView gig={result.gig_optimization} resultId={result.id} onUpdate={load} copy={copy} />
+            </TabsContent>
+
+            <TabsContent value="thumbnails" className="mt-6 space-y-4">
+              <ThumbnailsView gig={result.gig_optimization} copy={copy} />
             </TabsContent>
           </Tabs>
         )}
@@ -164,21 +179,42 @@ const Project = () => {
 
 const InsightsView = ({ insights, scrapedCount }: any) => {
   if (!insights) return null;
+  const score = insights.opportunity_score;
+  const scoreColor = score == null ? "text-muted-foreground" : score >= 70 ? "text-success" : score >= 50 ? "text-warning" : "text-destructive";
   return (
     <>
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="surface-card rounded-lg p-5">
           <div className="text-xs text-muted-foreground uppercase tracking-wider font-mono">Gigs Analyzed</div>
           <div className="text-3xl font-bold text-gradient font-mono mt-1">{scrapedCount}</div>
+        </div>
+        <div className="surface-card rounded-lg p-5 border-primary/30">
+          <div className="text-xs text-muted-foreground uppercase tracking-wider font-mono">Opportunity</div>
+          <div className={`text-3xl font-bold font-mono mt-1 ${scoreColor}`}>{score != null ? `${score}` : "—"}<span className="text-base text-muted-foreground">/100</span></div>
         </div>
         <div className="surface-card rounded-lg p-5">
           <div className="text-xs text-muted-foreground uppercase tracking-wider font-mono">Competition</div>
           <div className="text-2xl font-bold mt-1 capitalize">{insights.competition_level}</div>
         </div>
-        <div className="surface-card rounded-lg p-5 col-span-2 md:col-span-1">
-          <div className="text-xs text-muted-foreground uppercase tracking-wider font-mono">Avg Starting Price</div>
-          <div className="text-2xl font-bold text-primary mt-1">{insights.average_starting_price}</div>
+        <div className="surface-card rounded-lg p-5">
+          <div className="text-xs text-muted-foreground uppercase tracking-wider font-mono">Avg Top Orders</div>
+          <div className="text-base font-bold text-primary mt-1">{insights.average_top_orders || "—"}</div>
         </div>
+      </div>
+
+      {insights.opportunity_reasoning && (
+        <div className="surface-card rounded-lg p-5 border-primary/20">
+          <div className="flex items-center gap-2 mb-2">
+            <Gauge className="w-4 h-4 text-primary" />
+            <h3 className="font-semibold text-sm uppercase tracking-wider font-mono text-primary">Opportunity Reasoning</h3>
+          </div>
+          <p className="text-sm leading-relaxed">{insights.opportunity_reasoning}</p>
+        </div>
+      )}
+
+      <div className="surface-card rounded-lg p-5 inline-flex items-center gap-3">
+        <span className="text-xs text-muted-foreground uppercase tracking-wider font-mono">Avg Starting Price</span>
+        <span className="text-xl font-bold text-primary">{insights.average_starting_price}</span>
       </div>
 
       {insights.key_learnings?.length > 0 && (
@@ -325,11 +361,143 @@ const RegenButton = ({ resultId, section, fieldKey, onUpdate }: any) => {
   );
 };
 
+const ProfileStrengthCard = ({ strength }: any) => {
+  if (!strength) return null;
+  const s = strength.score ?? 0;
+  const color = s >= 80 ? "text-success" : s >= 60 ? "text-warning" : "text-destructive";
+  const bar = s >= 80 ? "bg-success" : s >= 60 ? "bg-warning" : "bg-destructive";
+  return (
+    <div className="surface-card rounded-lg p-5 border-primary/30">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <Gauge className="w-4 h-4 text-primary" />
+          <h3 className="font-semibold text-sm uppercase tracking-wider font-mono text-primary">Profile Strength</h3>
+        </div>
+        <div className={`text-3xl font-mono font-bold ${color}`}>{s}<span className="text-base text-muted-foreground">/100</span></div>
+      </div>
+      <div className="w-full h-2 rounded-full bg-muted/40 overflow-hidden mb-4">
+        <div className={`h-full ${bar} transition-all`} style={{ width: `${Math.min(100, Math.max(0, s))}%` }} />
+      </div>
+      {strength.breakdown && (
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-4">
+          {Object.entries(strength.breakdown).map(([k, v]: any) => (
+            <div key={k} className="rounded-md bg-muted/30 p-2 text-center">
+              <div className="text-[10px] uppercase tracking-wider font-mono text-muted-foreground truncate">{k.replace(/_/g, " ")}</div>
+              <div className="font-mono font-bold text-sm mt-1">{v}/20</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {strength.tips?.length > 0 && (
+        <ul className="space-y-2 text-sm">
+          {strength.tips.map((t: string, i: number) => (
+            <li key={i} className="flex gap-2"><span className="text-primary shrink-0">→</span>{t}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+};
+
+const TitleVariationsView = ({ gig, copy }: any) => {
+  const variations = gig?.title_variations || [];
+  if (variations.length === 0) return <div className="surface-card rounded-lg p-8 text-center text-muted-foreground">No title variations yet. Re-run research to generate them.</div>;
+  return (
+    <div className="space-y-3">
+      <div className="surface-card rounded-lg p-5 bg-primary/5 border-primary/30">
+        <div className="flex items-center gap-2 mb-1">
+          <Type className="w-4 h-4 text-primary" />
+          <h3 className="font-semibold text-sm uppercase tracking-wider font-mono text-primary">{variations.length} competitive title angles</h3>
+        </div>
+        <p className="text-sm text-muted-foreground">Each one models a real winning pattern from your scraped top sellers. Pick the angle that fits your style.</p>
+      </div>
+      {variations.map((v: any, i: number) => {
+        const len = (v.title || "").length;
+        const over = len > 80;
+        return (
+          <div key={i} className="surface-card rounded-lg p-5">
+            <div className="flex items-start justify-between gap-3 mb-2">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 mb-1 flex-wrap">
+                  <span className="font-mono text-xs text-primary">#{String(i + 1).padStart(2, "0")}</span>
+                  {v.angle && <Badge variant="outline" className="font-mono text-[10px]">{v.angle}</Badge>}
+                </div>
+                <div className="font-bold text-base break-words">{v.title}</div>
+              </div>
+              <Button size="icon" variant="ghost" onClick={() => copy(v.title)}><Copy className="w-4 h-4" /></Button>
+            </div>
+            {v.why_it_works && <div className="text-sm text-muted-foreground mt-2 border-l-2 border-primary/40 pl-3">{v.why_it_works}</div>}
+            <div className={`text-xs font-mono mt-2 ${over ? "text-destructive" : "text-muted-foreground"}`}>{len}/80 chars{over ? " — exceeds Fiverr limit" : ""}</div>
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
+const KeywordsView = ({ insights, copy }: any) => {
+  const top = insights?.top_keywords || [];
+  const expansion = insights?.keyword_expansion || [];
+  if (top.length === 0 && expansion.length === 0) return <div className="surface-card rounded-lg p-8 text-center text-muted-foreground">No keyword data.</div>;
+  return (
+    <>
+      <div className="surface-card rounded-lg p-5">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-semibold text-sm uppercase tracking-wider font-mono text-muted-foreground">Top Ranking Keywords</h3>
+          <Button size="icon" variant="ghost" onClick={() => copy(top.join(", "))}><Copy className="w-4 h-4" /></Button>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {top.map((k: string) => <Badge key={k} variant="outline" className="font-mono bg-primary/5 border-primary/30 text-primary">{k}</Badge>)}
+        </div>
+      </div>
+      <div className="surface-card rounded-lg p-5 border-secondary/30">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-semibold text-sm uppercase tracking-wider font-mono text-secondary">Keyword Expansion (long-tail / lower competition)</h3>
+          <Button size="icon" variant="ghost" onClick={() => copy(expansion.join(", "))}><Copy className="w-4 h-4" /></Button>
+        </div>
+        <p className="text-xs text-muted-foreground mb-3">Use these as secondary keywords or to spawn additional gigs.</p>
+        <div className="flex flex-wrap gap-2">
+          {expansion.map((k: string) => <Badge key={k} className="bg-secondary/10 text-secondary border-secondary/30">{k}</Badge>)}
+        </div>
+      </div>
+    </>
+  );
+};
+
+const ThumbnailsView = ({ gig, copy }: any) => {
+  const prompts = gig?.thumbnail_prompts || [];
+  if (prompts.length === 0) return <div className="surface-card rounded-lg p-8 text-center text-muted-foreground">No thumbnail prompts yet. Re-run research to generate them.</div>;
+  return (
+    <div className="space-y-4">
+      <div className="surface-card rounded-lg p-5 bg-primary/5 border-primary/30">
+        <div className="flex items-center gap-2 mb-1">
+          <ImageIcon className="w-4 h-4 text-primary" />
+          <h3 className="font-semibold text-sm uppercase tracking-wider font-mono text-primary">Thumbnail prompts for Midjourney / Flux</h3>
+        </div>
+        <p className="text-sm text-muted-foreground">Paste any prompt into your image generator to produce gallery-ready Fiverr thumbnails.</p>
+      </div>
+      {prompts.map((p: any, i: number) => (
+        <div key={i} className="surface-card rounded-lg p-5">
+          <div className="flex items-start justify-between gap-3 mb-2">
+            <div>
+              <span className="font-mono text-xs text-primary">#{i + 1}</span>
+              <div className="font-bold mt-1">{p.style}</div>
+            </div>
+            <Button size="sm" variant="outline" onClick={() => copy(p.prompt)}><Copy className="w-4 h-4 mr-1" />Copy</Button>
+          </div>
+          <pre className="text-xs font-mono whitespace-pre-wrap bg-background/60 rounded-md p-3 mt-2 leading-relaxed">{p.prompt}</pre>
+        </div>
+      ))}
+    </div>
+  );
+};
+
 const ProfileView = ({ profile, resultId, onUpdate, copy }: any) => {
   if (!profile) return null;
   const f = (label: string, key: string, multi = false) => <Field label={label} value={profile[key]} resultId={resultId} section="profile" fieldKey={key} onUpdate={onUpdate} copy={copy} multiline={multi} />;
   return (
     <>
+      <ProfileStrengthCard strength={profile.profile_strength} />
       {f("Display Name", "display_name")}
       {f("Profile Title", "profile_title")}
       {profile.short_bio !== undefined && f("Short Bio (≤150 chars)", "short_bio", true)}
@@ -414,7 +582,10 @@ function buildMarkdown(project: any, result: any): string {
   lines.push(`_Generated by RankForge · ${new Date().toLocaleString()}_\n`);
   lines.push(`## Market Intel`);
   lines.push(`- Competition: **${i.competition_level}**`);
+  if (i.opportunity_score != null) lines.push(`- Opportunity score: **${i.opportunity_score}/100**`);
+  if (i.opportunity_reasoning) lines.push(`- Why: ${i.opportunity_reasoning}`);
   lines.push(`- Avg starting price: **${i.average_starting_price}**`);
+  if (i.average_top_orders) lines.push(`- Avg top orders: **${i.average_top_orders}**`);
   lines.push(`- Gigs analyzed: **${result.scraped_data?.count || 0}**\n`);
   if (i.key_learnings?.length) {
     lines.push(`### Key Learnings`);
@@ -423,6 +594,7 @@ function buildMarkdown(project: any, result: any): string {
   }
   if (i.competition_summary) lines.push(`### Summary\n${i.competition_summary}\n`);
   if (i.top_keywords?.length) lines.push(`### Top Keywords\n${i.top_keywords.map((k: string) => `\`${k}\``).join(" · ")}\n`);
+  if (i.keyword_expansion?.length) lines.push(`### Keyword Expansion (long-tail)\n${i.keyword_expansion.map((k: string) => `\`${k}\``).join(" · ")}\n`);
   if (i.winning_patterns?.length) { lines.push(`### Winning Patterns`); i.winning_patterns.forEach((x: string) => lines.push(`- ${x}`)); lines.push(""); }
   if (i.top_sellers?.length) {
     lines.push(`## Top Sellers To Learn From`);
@@ -438,10 +610,24 @@ function buildMarkdown(project: any, result: any): string {
   lines.push(`- **Display name:** ${p.display_name}`);
   lines.push(`- **Profile title:** ${p.profile_title}`);
   if (p.short_bio) lines.push(`- **Short bio (${p.short_bio.length}/150):** ${p.short_bio}`);
+  if (p.profile_strength?.score != null) {
+    lines.push(`- **Profile strength:** ${p.profile_strength.score}/100`);
+    if (p.profile_strength.tips?.length) {
+      lines.push(`  - Tips:`);
+      p.profile_strength.tips.forEach((t: string) => lines.push(`    - ${t}`));
+    }
+  }
   lines.push(`\n**About:**\n${p.about}\n`);
   if (p.skills?.length) lines.push(`**Skills:** ${p.skills.join(", ")}\n`);
   lines.push(`## Gig`);
   lines.push(`- **Title (${(g.gig_title || "").length}/80):** ${g.gig_title}`);
+  if (g.title_variations?.length) {
+    lines.push(`\n### Title Variations`);
+    g.title_variations.forEach((v: any, n: number) => {
+      lines.push(`${n + 1}. **${v.title}** _(${v.angle})_ — ${v.why_it_works}`);
+    });
+    lines.push("");
+  }
   if (g.search_tags?.length) lines.push(`- **Tags:** ${g.search_tags.join(", ")}`);
   lines.push(`\n**Description (${(g.description || "").length}/1200):**\n${g.description}\n`);
   if (g.faqs?.length) {
@@ -455,6 +641,12 @@ function buildMarkdown(project: any, result: any): string {
       const pk = g.packages[t]; if (!pk) return;
       lines.push(`**${t.toUpperCase()} — ${pk.name} · ${pk.price}** (${pk.delivery_days}d, ${pk.revisions} rev)`);
       (pk.features || []).forEach((f: string) => lines.push(`  - ${f}`));
+    });
+  }
+  if (g.thumbnail_prompts?.length) {
+    lines.push(`\n## Thumbnail Prompts (Midjourney / Flux)`);
+    g.thumbnail_prompts.forEach((tp: any, n: number) => {
+      lines.push(`\n### ${n + 1}. ${tp.style}\n\n\`\`\`\n${tp.prompt}\n\`\`\``);
     });
   }
   return lines.join("\n");

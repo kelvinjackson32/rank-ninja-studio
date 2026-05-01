@@ -73,6 +73,7 @@ export type Database = {
       }
       projects: {
         Row: {
+          bulk_group_id: string | null
           created_at: string
           id: string
           niche: string
@@ -83,6 +84,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          bulk_group_id?: string | null
           created_at?: string
           id?: string
           niche: string
@@ -93,6 +95,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          bulk_group_id?: string | null
           created_at?: string
           id?: string
           niche?: string
