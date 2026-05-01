@@ -100,9 +100,13 @@ Deno.serve(async (req) => {
         const actorId = key.actor_id || "piotrv1001/fiverr-listings-scraper";
         try {
           await appendLog(admin, projectId, `   → Using key "${key.name}" (actor: ${actorId})`);
+          const searchUrl = `https://www.fiverr.com/search/gigs?query=${encodeURIComponent(q)}`;
           const items = await runApifyActor(key.api_key, actorId, {
+            // piotrv1001/fiverr-listings-scraper uses `searchUrls`
+            searchUrls: [{ url: searchUrl }],
+            // Compatibility with other community actors (epctex, etc.)
+            startUrls: [{ url: searchUrl }],
             search: q,
-            startUrls: [`https://www.fiverr.com/search/gigs?query=${encodeURIComponent(q)}`],
             maxItems: 30,
             maxPages: 3,
           });
