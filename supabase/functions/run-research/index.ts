@@ -145,8 +145,41 @@ Deno.serve(async (req) => {
     await appendLog(
       admin,
       projectId,
-      `🔍 Starting research for "${project.niche}"`,
+      `🔍 Starting research for "${project.niche}" (running in background)`,
     );
+
+    // Run heavy work in background to avoid 150s edge timeout.
+    // Frontend tracks progress via realtime updates on `projects`.
+    const work = (async () => {
+      try {
+        await runResearchWork(admin, user.id, projectId, project);
+      } catch (e: any) {
+        console.error("background run-research error:", e);
+        try {
+          await admin.from("projects").update({ status: "error" }).eq("id", projectId);
+          await appendLog(admin, projectId, `❌ ${e.message}`);
+        } catch {}
+      }
+    })();
+    // @ts-ignore - EdgeRuntime is available in Supabase Edge Functions
+    if (typeof EdgeRuntime !== "undefined" && EdgeRuntime.waitUntil) {
+      // @ts-ignore
+      EdgeRuntime.waitUntil(work);
+    }
+
+    return new Response(JSON.stringify({ success: true, queued: true }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  } catch (e: any) {
+    console.error("run-research error:", e);
+    return new Response(JSON.stringify({ error: e.message }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+});
+
+async function runResearchWork(admin: any, userId: string, projectId: string, project: any) {
 
     // Get user's keys ordered by status (active first), then last_used_at
     const { data: keys } = await admin
