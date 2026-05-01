@@ -250,15 +250,51 @@ Deno.serve(async (req) => {
     await appendLog(admin, projectId, `🤖 AI analyzing winning patterns...`);
 
     const insightsText = await callAI(
-      `Analyze these REAL Fiverr gigs scraped for niche "${project.niche}":\n${dataBlob}\n\nReturn JSON: { "competition_level": "low|medium|high|saturated", "competition_summary": "...", "top_keywords": ["kw1",...], "winning_patterns": ["pattern1",...], "top_rated_differentiators": ["...",...], "average_starting_price": "$X", "common_package_structure": "..." }`,
-      "You are an expert Fiverr SEO analyst. Output only valid JSON, no prose.",
+      `Analyze these REAL Fiverr gigs scraped for niche "${project.niche}":\n${dataBlob}\n\nReturn JSON with these EXACT keys:
+{
+  "competition_level": "low|medium|high|saturated",
+  "competition_summary": "2-3 sentences on the market state",
+  "top_keywords": ["10-15 high-ranking keywords pulled from real titles/tags"],
+  "winning_patterns": ["5-8 patterns the best gigs share"],
+  "top_rated_differentiators": ["5-8 things Top Rated / Fiverr's Choice sellers do differently"],
+  "average_starting_price": "$X",
+  "common_package_structure": "describe basic/standard/premium pattern",
+  "top_sellers": [
+    {
+      "seller_name": "from data",
+      "gig_title": "their actual gig title",
+      "level": "Top Rated / Level 2 / Fiverr's Choice / etc",
+      "rating": "4.9",
+      "reviews": 1234,
+      "starting_price": "$X",
+      "why_ranking": "1 sentence: why THIS gig ranks (keyword placement, price, packaging, social proof, niche angle)",
+      "what_to_copy": "1 actionable tactic the user should steal from them"
+    }
+  ],
+  "key_learnings": ["6-10 plain-English lessons the user should take away from this research, written as direct advice ('Lead your title with the primary keyword, like X does...', 'Price your basic at $Y because...')"]
+}
+
+For "top_sellers": pick the 5 BEST performers (prioritize Top Rated, Fiverr's Choice, highest review counts). Use REAL names and titles from the scraped data. Be specific in "why_ranking" and "what_to_copy" — reference actual words from their titles when possible.`,
+      "You are an expert Fiverr SEO analyst. Output only valid JSON, no prose. Be specific and reference real data.",
     );
     const insights = extractJson(insightsText);
 
     await appendLog(admin, projectId, `✏️ Generating profile optimization...`);
     const profileText = await callAI(
-      `Based on this Fiverr competitor research for "${project.niche}":\nInsights: ${JSON.stringify(insights)}\nTop gigs sample: ${dataBlob.slice(0, 10000)}\n\nGenerate a complete Fiverr PROFILE for a NEW seller (zero reviews) that competes with top performers. Return JSON: { "display_name": "...", "profile_title": "headline under name (max 70 chars)", "about": "600-1000 char authority-building bio, keyword-rich, conversion-focused, human tone", "skills": ["max 15 skills"], "work_experience": [{"title":"...","company":"...","years":"..."}], "education": [{"degree":"...","institution":"...","year":"..."}], "certifications": ["..."], "languages": [{"name":"English","level":"Native/Fluent"}] }`,
-      "You are an expert Fiverr profile strategist. Output only valid JSON. Make text natural, persuasive, never robotic. Build trust for new sellers.",
+      `Based on this Fiverr competitor research for "${project.niche}":\nInsights: ${JSON.stringify(insights)}\nTop gigs sample: ${dataBlob.slice(0, 10000)}\n\nGenerate a complete Fiverr PROFILE for a NEW seller (zero reviews) that competes with top performers. Return JSON:
+{
+  "display_name": "...",
+  "profile_title": "headline under name (max 70 chars)",
+  "short_bio": "MAX 150 characters. Punchy, keyword-rich, hook-style. This is the short bio shown on the profile card. NEVER exceed 150 chars.",
+  "about": "600-1000 char authority-building long bio for the About section, keyword-rich, conversion-focused, human tone",
+  "skills": ["max 15 skills"],
+  "work_experience": [{"title":"...","company":"...","years":"..."}],
+  "education": [{"degree":"...","institution":"...","year":"..."}],
+  "certifications": ["..."],
+  "languages": [{"name":"English","level":"Native/Fluent"}]
+}
+CRITICAL: short_bio must be <=150 characters total including spaces.`,
+      "You are an expert Fiverr profile strategist. Output only valid JSON. Make text natural, persuasive, never robotic. Build trust for new sellers. Strictly respect character limits.",
     );
     const profile_optimization = extractJson(profileText);
 
