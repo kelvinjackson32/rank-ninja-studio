@@ -16,7 +16,7 @@ async function appendLog(supabase: any, projectId: string, msg: string) {
 
 async function runApifyActor(apiKey: string, actorId: string, input: any): Promise<any[]> {
   // Apify actor IDs may contain '/' which must be encoded as '~'
-  const safeActorId = actorId.replace("/", "~");
+  const safeActorId = actorId.replace(/\//g, "~");
   const url = `${APIFY_BASE}/acts/${safeActorId}/run-sync-get-dataset-items?token=${apiKey}&timeout=120`;
   const resp = await fetch(url, {
     method: "POST",
@@ -25,11 +25,24 @@ async function runApifyActor(apiKey: string, actorId: string, input: any): Promi
   });
   if (!resp.ok) {
     const text = await resp.text();
-    const err: any = new Error(`Apify ${resp.status}: ${text.slice(0, 300)}`);
+    const runId = text.match(/run ID:\s*([A-Za-z0-9_-]+)/)?.[1];
+    const runLog = runId ? await getApifyRunLog(apiKey, runId) : "";
+    const err: any = new Error(`Apify ${resp.status}: ${text.slice(0, 300)}${runLog ? `\nRun log: ${runLog}` : ""}`);
     err.status = resp.status;
     throw err;
   }
   return await resp.json();
+}
+
+async function getApifyRunLog(apiKey: string, runId: string): Promise<string> {
+  try {
+    const resp = await fetch(`${APIFY_BASE}/logs/${runId}?token=${apiKey}`);
+    if (!resp.ok) return "";
+    const text = await resp.text();
+    return text.split("\n").filter(Boolean).slice(-8).join("\n").slice(0, 900);
+  } catch {
+    return "";
+  }
 }
 
 async function callAI(prompt: string, system: string): Promise<string> {
@@ -102,8 +115,9 @@ Deno.serve(async (req) => {
           await appendLog(admin, projectId, `   → Using key "${key.name}" (actor: ${actorId})`);
           const searchUrl = `https://www.fiverr.com/search/gigs?query=${encodeURIComponent(q)}`;
           const items = await runApifyActor(key.api_key, actorId, {
-            // piotrv1001/fiverr-listings-scraper uses `searchUrls`
-            searchUrls: [{ url: searchUrl }],
+            // piotrv1001/fiverr-listings-scraper expects `searchUrls` as string URLs.
+            searchUrls: [searchUrl],
+            maxItemsPerUrl: 30,
             // Compatibility with other community actors (epctex, etc.)
             startUrls: [{ url: searchUrl }],
             search: q,
