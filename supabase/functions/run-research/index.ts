@@ -297,6 +297,9 @@ CRITICAL: short_bio must be <=150 characters total including spaces.`,
       "You are an expert Fiverr profile strategist. Output only valid JSON. Make text natural, persuasive, never robotic. Build trust for new sellers. Strictly respect character limits.",
     );
     const profile_optimization = extractJson(profileText);
+    if (typeof profile_optimization.short_bio === "string" && profile_optimization.short_bio.length > 150) {
+      profile_optimization.short_bio = profile_optimization.short_bio.slice(0, 147).trimEnd() + "...";
+    }
 
     await appendLog(admin, projectId, `🎯 Generating gig optimization...`);
     const gigText = await callAI(
