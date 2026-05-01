@@ -179,21 +179,42 @@ const Project = () => {
 
 const InsightsView = ({ insights, scrapedCount }: any) => {
   if (!insights) return null;
+  const score = insights.opportunity_score;
+  const scoreColor = score == null ? "text-muted-foreground" : score >= 70 ? "text-success" : score >= 50 ? "text-warning" : "text-destructive";
   return (
     <>
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="surface-card rounded-lg p-5">
           <div className="text-xs text-muted-foreground uppercase tracking-wider font-mono">Gigs Analyzed</div>
           <div className="text-3xl font-bold text-gradient font-mono mt-1">{scrapedCount}</div>
+        </div>
+        <div className="surface-card rounded-lg p-5 border-primary/30">
+          <div className="text-xs text-muted-foreground uppercase tracking-wider font-mono">Opportunity</div>
+          <div className={`text-3xl font-bold font-mono mt-1 ${scoreColor}`}>{score != null ? `${score}` : "—"}<span className="text-base text-muted-foreground">/100</span></div>
         </div>
         <div className="surface-card rounded-lg p-5">
           <div className="text-xs text-muted-foreground uppercase tracking-wider font-mono">Competition</div>
           <div className="text-2xl font-bold mt-1 capitalize">{insights.competition_level}</div>
         </div>
-        <div className="surface-card rounded-lg p-5 col-span-2 md:col-span-1">
-          <div className="text-xs text-muted-foreground uppercase tracking-wider font-mono">Avg Starting Price</div>
-          <div className="text-2xl font-bold text-primary mt-1">{insights.average_starting_price}</div>
+        <div className="surface-card rounded-lg p-5">
+          <div className="text-xs text-muted-foreground uppercase tracking-wider font-mono">Avg Top Orders</div>
+          <div className="text-base font-bold text-primary mt-1">{insights.average_top_orders || "—"}</div>
         </div>
+      </div>
+
+      {insights.opportunity_reasoning && (
+        <div className="surface-card rounded-lg p-5 border-primary/20">
+          <div className="flex items-center gap-2 mb-2">
+            <Gauge className="w-4 h-4 text-primary" />
+            <h3 className="font-semibold text-sm uppercase tracking-wider font-mono text-primary">Opportunity Reasoning</h3>
+          </div>
+          <p className="text-sm leading-relaxed">{insights.opportunity_reasoning}</p>
+        </div>
+      )}
+
+      <div className="surface-card rounded-lg p-5 inline-flex items-center gap-3">
+        <span className="text-xs text-muted-foreground uppercase tracking-wider font-mono">Avg Starting Price</span>
+        <span className="text-xl font-bold text-primary">{insights.average_starting_price}</span>
       </div>
 
       {insights.key_learnings?.length > 0 && (
