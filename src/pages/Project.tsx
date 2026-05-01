@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, Copy, Loader2, Sparkles, RefreshCw, Tag, MessageSquare, Package, User, Briefcase } from "lucide-react";
+import { ArrowLeft, Copy, Loader2, Sparkles, RefreshCw, Tag, MessageSquare, Package, User, Download, Trophy, Lightbulb, Star, RotateCw } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
@@ -10,10 +10,19 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "sonner";
 
+// Fiverr platform limits used for warnings
+const LIMITS: Record<string, number> = {
+  gig_title: 80,
+  description: 1200,
+  short_bio: 150,
+  profile_title: 70,
+};
+
 const Project = () => {
   const { id } = useParams();
   const [project, setProject] = useState<any>(null);
   const [result, setResult] = useState<any>(null);
+  const [rerunning, setRerunning] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
 
   const load = async () => {
@@ -27,7 +36,6 @@ const Project = () => {
 
   useEffect(() => { if (id) load(); }, [id]);
 
-  // Realtime subscribe to project updates
   useEffect(() => {
     if (!id) return;
     const ch = supabase.channel(`project-${id}`)
@@ -43,32 +51,68 @@ const Project = () => {
 
   const copy = (text: string) => { navigator.clipboard.writeText(text); toast.success("Copied"); };
 
+  const rerun = async () => {
+    setRerunning(true);
+    try {
+      const { error } = await supabase.functions.invoke("run-research", { body: { projectId: id } });
+      if (error) throw error;
+      toast.success("Research re-launched");
+      load();
+    } catch (e: any) { toast.error(e.message); } finally { setRerunning(false); }
+  };
+
+  const markdown = useMemo(() => result ? buildMarkdown(project, result) : "", [project, result]);
+
+  const exportMd = () => {
+    const blob = new Blob([markdown], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${(project?.niche || "rankforge").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   if (!project) return <AppShell><div className="p-8">Loading...</div></AppShell>;
 
   const isRunning = project.status === "scraping" || project.status === "analyzing" || project.status === "pending";
+  const canRerun = project.status === "complete" || project.status === "error";
 
   return (
     <AppShell>
-      <div className="p-8 max-w-6xl">
+      <div className="p-4 md:p-8 max-w-6xl">
         <Link to="/app" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-primary mb-4"><ArrowLeft className="w-4 h-4" />Dashboard</Link>
-        <div className="flex items-start justify-between mb-6">
-          <div>
+        <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4 mb-6">
+          <div className="min-w-0">
             <div className="font-mono text-xs text-primary uppercase tracking-widest mb-1">// PROJECT</div>
-            <h1 className="text-3xl font-bold tracking-tight">{project.niche}</h1>
+            <h1 className="text-2xl md:text-3xl font-bold tracking-tight break-words">{project.niche}</h1>
             {project.secondary_keywords?.length > 0 && (
-              <div className="flex gap-2 mt-2">
+              <div className="flex flex-wrap gap-2 mt-2">
                 {project.secondary_keywords.map((k: string) => <Badge key={k} variant="outline" className="font-mono">{k}</Badge>)}
               </div>
             )}
           </div>
-          <Badge className={
-            project.status === "complete" ? "bg-success/15 text-success border-success/30" :
-            project.status === "error" ? "bg-destructive/15 text-destructive border-destructive/30" :
-            "bg-primary/15 text-primary border-primary/30"
-          }>{project.status}</Badge>
+          <div className="flex items-center gap-2 flex-wrap">
+            <Badge className={
+              project.status === "complete" ? "bg-success/15 text-success border-success/30" :
+              project.status === "error" ? "bg-destructive/15 text-destructive border-destructive/30" :
+              "bg-primary/15 text-primary border-primary/30"
+            }>{project.status}</Badge>
+            {result && (
+              <>
+                <Button size="sm" variant="outline" onClick={() => copy(markdown)}><Copy className="w-4 h-4 mr-1" />Copy all</Button>
+                <Button size="sm" variant="outline" onClick={exportMd}><Download className="w-4 h-4 mr-1" />Export .md</Button>
+              </>
+            )}
+            {canRerun && (
+              <Button size="sm" variant="outline" onClick={rerun} disabled={rerunning}>
+                {rerunning ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <RotateCw className="w-4 h-4 mr-1" />}
+                Re-run
+              </Button>
+            )}
+          </div>
         </div>
 
-        {/* Progress log */}
         {(isRunning || project.status === "error") && (
           <div className="surface-card rounded-xl p-5 mb-6 scan-line">
             <div className="flex items-center gap-2 mb-3">
@@ -80,7 +124,7 @@ const Project = () => {
               {(project.progress_log || []).map((entry: any, i: number) => (
                 <div key={i} className="flex gap-3">
                   <span className="text-muted-foreground/60 shrink-0">{new Date(entry.ts).toLocaleTimeString()}</span>
-                  <span className="text-foreground/90 whitespace-pre-wrap">{entry.msg}</span>
+                  <span className="text-foreground/90 whitespace-pre-wrap break-words">{entry.msg}</span>
                 </div>
               ))}
             </div>
@@ -89,14 +133,19 @@ const Project = () => {
 
         {result && (
           <Tabs defaultValue="insights">
-            <TabsList className="bg-muted/40 border border-border">
+            <TabsList className="bg-muted/40 border border-border flex-wrap h-auto">
               <TabsTrigger value="insights"><Sparkles className="w-4 h-4 mr-1" />Insights</TabsTrigger>
+              <TabsTrigger value="sellers"><Trophy className="w-4 h-4 mr-1" />Top Sellers</TabsTrigger>
               <TabsTrigger value="profile"><User className="w-4 h-4 mr-1" />Profile</TabsTrigger>
               <TabsTrigger value="gig"><Package className="w-4 h-4 mr-1" />Gig</TabsTrigger>
             </TabsList>
 
             <TabsContent value="insights" className="mt-6 space-y-4">
               <InsightsView insights={result.insights} scrapedCount={result.scraped_data?.count || 0} />
+            </TabsContent>
+
+            <TabsContent value="sellers" className="mt-6 space-y-4">
+              <TopSellersView insights={result.insights} />
             </TabsContent>
 
             <TabsContent value="profile" className="mt-6 space-y-4">
@@ -117,7 +166,7 @@ const InsightsView = ({ insights, scrapedCount }: any) => {
   if (!insights) return null;
   return (
     <>
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
         <div className="surface-card rounded-lg p-5">
           <div className="text-xs text-muted-foreground uppercase tracking-wider font-mono">Gigs Analyzed</div>
           <div className="text-3xl font-bold text-gradient font-mono mt-1">{scrapedCount}</div>
@@ -126,11 +175,29 @@ const InsightsView = ({ insights, scrapedCount }: any) => {
           <div className="text-xs text-muted-foreground uppercase tracking-wider font-mono">Competition</div>
           <div className="text-2xl font-bold mt-1 capitalize">{insights.competition_level}</div>
         </div>
-        <div className="surface-card rounded-lg p-5">
+        <div className="surface-card rounded-lg p-5 col-span-2 md:col-span-1">
           <div className="text-xs text-muted-foreground uppercase tracking-wider font-mono">Avg Starting Price</div>
           <div className="text-2xl font-bold text-primary mt-1">{insights.average_starting_price}</div>
         </div>
       </div>
+
+      {insights.key_learnings?.length > 0 && (
+        <div className="surface-card rounded-lg p-5 border-primary/30">
+          <div className="flex items-center gap-2 mb-3">
+            <Lightbulb className="w-4 h-4 text-primary" />
+            <h3 className="font-semibold text-sm uppercase tracking-wider font-mono text-primary">What you should learn from this research</h3>
+          </div>
+          <ul className="space-y-2 text-sm">
+            {insights.key_learnings.map((p: string, i: number) => (
+              <li key={i} className="flex gap-3">
+                <span className="text-primary font-mono shrink-0">{String(i + 1).padStart(2, "0")}</span>
+                <span>{p}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <Section title="Competition Summary">{insights.competition_summary}</Section>
       <Section title="Top Keywords (Real Top Sellers)">
         <div className="flex flex-wrap gap-2">
@@ -152,6 +219,51 @@ const InsightsView = ({ insights, scrapedCount }: any) => {
   );
 };
 
+const TopSellersView = ({ insights }: any) => {
+  const sellers = insights?.top_sellers || [];
+  if (sellers.length === 0) return <div className="surface-card rounded-lg p-8 text-center text-muted-foreground">No top-seller data available. Try re-running the research.</div>;
+  return (
+    <div className="space-y-4">
+      <div className="surface-card rounded-lg p-5 bg-primary/5 border-primary/30">
+        <div className="flex items-center gap-2 mb-1">
+          <Trophy className="w-4 h-4 text-primary" />
+          <h3 className="font-semibold text-sm uppercase tracking-wider font-mono text-primary">Sellers ranking #1 for your niche</h3>
+        </div>
+        <p className="text-sm text-muted-foreground">Here's exactly who's winning, why, and what tactics you should copy.</p>
+      </div>
+      {sellers.map((s: any, i: number) => (
+        <div key={i} className="surface-card rounded-lg p-5">
+          <div className="flex items-start justify-between gap-4 flex-wrap mb-3">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="font-mono text-xs text-primary">#{i + 1}</span>
+                <span className="font-bold">{s.seller_name || "Unknown seller"}</span>
+                {s.level && <Badge className="bg-secondary/15 text-secondary border-secondary/30 text-xs">{s.level}</Badge>}
+              </div>
+              <div className="text-sm text-foreground/80">"{s.gig_title}"</div>
+            </div>
+            <div className="flex items-center gap-3 text-xs font-mono text-muted-foreground">
+              {s.rating && <span className="flex items-center gap-1"><Star className="w-3 h-3 text-warning" />{s.rating}</span>}
+              {s.reviews && <span>{s.reviews} reviews</span>}
+              {s.starting_price && <span className="text-primary">{s.starting_price}</span>}
+            </div>
+          </div>
+          <div className="grid md:grid-cols-2 gap-3 mt-3">
+            <div className="rounded-md bg-muted/30 p-3">
+              <div className="text-[10px] uppercase tracking-wider font-mono text-muted-foreground mb-1">Why they rank</div>
+              <div className="text-sm">{s.why_ranking}</div>
+            </div>
+            <div className="rounded-md bg-primary/5 border border-primary/20 p-3">
+              <div className="text-[10px] uppercase tracking-wider font-mono text-primary mb-1">Steal this</div>
+              <div className="text-sm">{s.what_to_copy}</div>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+};
+
 const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
   <div className="surface-card rounded-lg p-5">
     <h3 className="font-semibold text-sm uppercase tracking-wider font-mono text-muted-foreground mb-3">{title}</h3>
@@ -161,9 +273,13 @@ const Section = ({ title, children }: { title: string; children: React.ReactNode
 
 const Field = ({ label, value, resultId, section, fieldKey, onUpdate, copy, multiline = false }: any) => {
   const text = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  const limit = LIMITS[fieldKey];
+  const len = typeof value === "string" ? value.length : 0;
+  const over = limit && len > limit;
+  const near = limit && !over && len > limit * 0.9;
   return (
     <div className="surface-card rounded-lg p-5">
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between mb-3 gap-2">
         <h3 className="font-semibold text-sm uppercase tracking-wider font-mono text-muted-foreground">{label}</h3>
         <div className="flex gap-1">
           <RegenButton resultId={resultId} section={section} fieldKey={fieldKey} onUpdate={onUpdate} />
@@ -173,7 +289,11 @@ const Field = ({ label, value, resultId, section, fieldKey, onUpdate, copy, mult
       <div className={`text-sm leading-relaxed ${multiline ? "whitespace-pre-wrap" : ""} ${typeof value === "string" ? "" : "font-mono text-xs"}`}>
         {typeof value === "string" ? value : <pre className="overflow-x-auto">{text}</pre>}
       </div>
-      {typeof value === "string" && <div className="text-xs text-muted-foreground font-mono mt-2">{value.length} chars</div>}
+      {typeof value === "string" && (
+        <div className={`text-xs font-mono mt-2 ${over ? "text-destructive" : near ? "text-warning" : "text-muted-foreground"}`}>
+          {len}{limit ? ` / ${limit}` : ""} chars{over ? " — exceeds Fiverr limit, regenerate" : limit ? " (Fiverr limit)" : ""}
+        </div>
+      )}
     </div>
   );
 };
@@ -212,7 +332,8 @@ const ProfileView = ({ profile, resultId, onUpdate, copy }: any) => {
     <>
       {f("Display Name", "display_name")}
       {f("Profile Title", "profile_title")}
-      {f("About / Bio", "about", true)}
+      {profile.short_bio !== undefined && f("Short Bio (≤150 chars)", "short_bio", true)}
+      {f("About / Long Bio", "about", true)}
       <div className="surface-card rounded-lg p-5">
         <h3 className="font-semibold text-sm uppercase tracking-wider font-mono text-muted-foreground mb-3">Skills & Expertise</h3>
         <div className="flex flex-wrap gap-2">
@@ -232,7 +353,7 @@ const GigView = ({ gig, resultId, onUpdate, copy }: any) => {
   const f = (label: string, key: string, multi = false) => <Field label={label} value={gig[key]} resultId={resultId} section="gig" fieldKey={key} onUpdate={onUpdate} copy={copy} multiline={multi} />;
   return (
     <>
-      {f("Gig Title", "gig_title")}
+      {f("Gig Title (≤80 chars)", "gig_title")}
       <div className="surface-card rounded-lg p-5">
         <div className="flex items-center justify-between mb-3">
           <h3 className="font-semibold text-sm uppercase tracking-wider font-mono text-muted-foreground"><Tag className="w-4 h-4 inline mr-1" />Search Tags</h3>
@@ -242,7 +363,7 @@ const GigView = ({ gig, resultId, onUpdate, copy }: any) => {
           {(gig.search_tags || []).map((t: string) => <Badge key={t} className="bg-secondary/10 text-secondary border-secondary/30">{t}</Badge>)}
         </div>
       </div>
-      {f("Description", "description", true)}
+      {f("Description (≤1200 chars)", "description", true)}
       <div className="surface-card rounded-lg p-5">
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-semibold text-sm uppercase tracking-wider font-mono text-muted-foreground"><MessageSquare className="w-4 h-4 inline mr-1" />FAQs</h3>
@@ -283,5 +404,60 @@ const GigView = ({ gig, resultId, onUpdate, copy }: any) => {
     </>
   );
 };
+
+function buildMarkdown(project: any, result: any): string {
+  const i = result.insights || {};
+  const p = result.profile_optimization || {};
+  const g = result.gig_optimization || {};
+  const lines: string[] = [];
+  lines.push(`# ${project.niche} — Fiverr Blueprint`);
+  lines.push(`_Generated by RankForge · ${new Date().toLocaleString()}_\n`);
+  lines.push(`## Market Intel`);
+  lines.push(`- Competition: **${i.competition_level}**`);
+  lines.push(`- Avg starting price: **${i.average_starting_price}**`);
+  lines.push(`- Gigs analyzed: **${result.scraped_data?.count || 0}**\n`);
+  if (i.key_learnings?.length) {
+    lines.push(`### Key Learnings`);
+    i.key_learnings.forEach((l: string, n: number) => lines.push(`${n + 1}. ${l}`));
+    lines.push("");
+  }
+  if (i.competition_summary) lines.push(`### Summary\n${i.competition_summary}\n`);
+  if (i.top_keywords?.length) lines.push(`### Top Keywords\n${i.top_keywords.map((k: string) => `\`${k}\``).join(" · ")}\n`);
+  if (i.winning_patterns?.length) { lines.push(`### Winning Patterns`); i.winning_patterns.forEach((x: string) => lines.push(`- ${x}`)); lines.push(""); }
+  if (i.top_sellers?.length) {
+    lines.push(`## Top Sellers To Learn From`);
+    i.top_sellers.forEach((s: any, n: number) => {
+      lines.push(`### ${n + 1}. ${s.seller_name} ${s.level ? `(${s.level})` : ""}`);
+      lines.push(`> "${s.gig_title}"`);
+      lines.push(`- Rating: ${s.rating || "?"} · Reviews: ${s.reviews || "?"} · Price: ${s.starting_price || "?"}`);
+      lines.push(`- **Why ranking:** ${s.why_ranking}`);
+      lines.push(`- **Steal this:** ${s.what_to_copy}\n`);
+    });
+  }
+  lines.push(`## Profile`);
+  lines.push(`- **Display name:** ${p.display_name}`);
+  lines.push(`- **Profile title:** ${p.profile_title}`);
+  if (p.short_bio) lines.push(`- **Short bio (${p.short_bio.length}/150):** ${p.short_bio}`);
+  lines.push(`\n**About:**\n${p.about}\n`);
+  if (p.skills?.length) lines.push(`**Skills:** ${p.skills.join(", ")}\n`);
+  lines.push(`## Gig`);
+  lines.push(`- **Title (${(g.gig_title || "").length}/80):** ${g.gig_title}`);
+  if (g.search_tags?.length) lines.push(`- **Tags:** ${g.search_tags.join(", ")}`);
+  lines.push(`\n**Description (${(g.description || "").length}/1200):**\n${g.description}\n`);
+  if (g.faqs?.length) {
+    lines.push(`### FAQs`);
+    g.faqs.forEach((q: any) => lines.push(`- **Q:** ${q.q}\n  **A:** ${q.a}`));
+    lines.push("");
+  }
+  if (g.packages) {
+    lines.push(`### Packages`);
+    ["basic", "standard", "premium"].forEach((t) => {
+      const pk = g.packages[t]; if (!pk) return;
+      lines.push(`**${t.toUpperCase()} — ${pk.name} · ${pk.price}** (${pk.delivery_days}d, ${pk.revisions} rev)`);
+      (pk.features || []).forEach((f: string) => lines.push(`  - ${f}`));
+    });
+  }
+  return lines.join("\n");
+}
 
 export default Project;
