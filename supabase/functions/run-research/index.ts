@@ -266,22 +266,36 @@ async function runResearchWork(admin: any, userId: string, projectId: string, pr
       .update({ status: "analyzing" })
       .eq("id", projectId);
 
-    // Compact scraped data for AI — include order/queue signals
-    const compacted = allItems.slice(0, 90).map((g: any) => ({
-      title: g.title || g.gigTitle,
-      seller: g.seller?.name || g.sellerName || g.seller,
-      level: g.seller?.level || g.sellerLevel,
-      isTopRated: !!(g.seller?.isTopRated || g.isTopRated),
-      isFiverrChoice: !!(g.isFiverrChoice || g.choice || g.fiverrChoice),
-      isPro: !!(g.isPro || g.seller?.isPro),
-      rating: g.rating || g.seller?.rating,
-      reviews: g.reviewCount || g.numReviews || g.reviews,
-      orders_in_queue: g.ordersInQueue || g.queue || g.activeOrders,
-      price: g.price || g.startingPrice,
-      tags: g.tags || g.searchTags,
-      description: (g.description || g.gigDescription || "").slice(0, 400),
-      query: g._query,
-    }));
+    // Compact scraped data for AI — include order/queue signals + source URLs
+    const normalizeUrl = (u: any): string | null => {
+      if (!u || typeof u !== "string") return null;
+      if (u.startsWith("http")) return u;
+      if (u.startsWith("/")) return `https://www.fiverr.com${u}`;
+      return null;
+    };
+    const compacted = allItems.slice(0, 90).map((g: any) => {
+      const sellerName = g.seller?.name || g.sellerName || (typeof g.seller === "string" ? g.seller : null) || g.username;
+      const gigUrl = normalizeUrl(g.url || g.gigUrl || g.link || g.gigLink || g.permalink);
+      const sellerUrl = normalizeUrl(g.seller?.url || g.seller?.profileUrl || g.sellerUrl || g.sellerProfileUrl)
+        || (sellerName ? `https://www.fiverr.com/${String(sellerName).replace(/^@/, "")}` : null);
+      return {
+        title: g.title || g.gigTitle,
+        seller: sellerName,
+        level: g.seller?.level || g.sellerLevel,
+        isTopRated: !!(g.seller?.isTopRated || g.isTopRated),
+        isFiverrChoice: !!(g.isFiverrChoice || g.choice || g.fiverrChoice),
+        isPro: !!(g.isPro || g.seller?.isPro),
+        rating: g.rating || g.seller?.rating,
+        reviews: g.reviewCount || g.numReviews || g.reviews,
+        orders_in_queue: g.ordersInQueue || g.queue || g.activeOrders,
+        price: g.price || g.startingPrice,
+        tags: g.tags || g.searchTags,
+        description: (g.description || g.gigDescription || "").slice(0, 400),
+        gig_url: gigUrl,
+        seller_url: sellerUrl,
+        query: g._query,
+      };
+    });
 
     const dataBlob = JSON.stringify(compacted).slice(0, 38000);
 
