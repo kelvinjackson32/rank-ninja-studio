@@ -441,7 +441,7 @@ For "opportunity_score": be brutally honest. Saturated low-demand = 20-40. Satur
   "display_name": "...",
   "profile_title": "headline under name (max 70 chars)",
   "short_bio": "MAX 150 characters. Punchy, keyword-rich, hook-style. NEVER exceed 150 chars.",
-  "about": "600-1000 char authority-building long bio for the About section, keyword-rich, conversion-focused, human tone",
+  "about": "STRUCTURED long bio for the Fiverr 'About me' section, 600-1000 characters total. MUST be plain text with real line breaks (use \\n). Open with a warm 1-line greeting + name (e.g. 'Hi there! I'm <Name>.'). Follow with a 2-3 sentence positioning paragraph: who you help, what you specialize in (use the niche keyword naturally 2-3 times), years/experience or proof, what makes you different. Close with 1 sentence inviting the buyer to message. Conversational, confident, never robotic. NO markdown headers, NO bullet symbols — match the natural paragraph style of top Fiverr 'About me' sections.",
   "skills": ["max 15 skills"],
   "work_experience": [{"title":"...","company":"...","years":"..."}],
   "education": [{"degree":"...","institution":"...","year":"..."}],
