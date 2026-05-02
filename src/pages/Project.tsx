@@ -294,6 +294,26 @@ const TopSellersView = ({ insights }: any) => {
               <div className="text-sm">{s.what_to_copy}</div>
             </div>
           </div>
+          {(s.gig_url || s.seller_url || s.source_search_url) && (
+            <div className="mt-3 pt-3 border-t border-border/50 flex flex-wrap items-center gap-3 text-xs font-mono">
+              <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Sources:</span>
+              {s.gig_url && (
+                <a href={s.gig_url} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline inline-flex items-center gap-1">
+                  View gig <ExternalLink className="w-3 h-3" />
+                </a>
+              )}
+              {s.seller_url && (
+                <a href={s.seller_url} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline inline-flex items-center gap-1">
+                  Seller profile <ExternalLink className="w-3 h-3" />
+                </a>
+              )}
+              {s.source_search_url && (
+                <a href={s.source_search_url} target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-primary inline-flex items-center gap-1">
+                  Search results <ExternalLink className="w-3 h-3" />
+                </a>
+              )}
+            </div>
+          )}
         </div>
       ))}
     </div>
