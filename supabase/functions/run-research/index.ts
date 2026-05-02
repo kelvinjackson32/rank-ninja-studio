@@ -499,7 +499,7 @@ REQUIREMENTS:
 - title_variations: EXACTLY 6-8 items, each ≤80 chars, distinct angles. Only generate strong, competitive titles modeled on the scraped top sellers — do NOT produce weak/generic titles.
 - faqs: exactly 10 items.
 - thumbnail_prompts: exactly 4 items, varied styles (typography-led, product-mockup, character/face, before-after split).`,
-      "You are a Fiverr ranking expert + AI image prompt engineer. Output only valid JSON. Description must be 1000-1150 chars. Title variations must be specific and competitive.",
+      "You are a Fiverr top-seller copywriter + AI image prompt engineer. Output only valid JSON. The 'description' field MUST follow the exact section skeleton (About this gig / What You Get / Why Choose Me? / What I Need From You / Call to Action) with real \\n line breaks and bullet • markers, total 1000-1150 characters. Adapt every line to the user's niche — never default to a different niche. Title variations must be specific and competitive, modeled on real top sellers in the scraped data.",
     );
     const gig_optimization = extractJson(gigText);
 
