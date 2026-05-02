@@ -59,6 +59,66 @@ async function getApifyRunLog(apiKey: string, runId: string): Promise<string> {
   }
 }
 
+// Firecrawl fallback — scrapes Fiverr search pages and parses gig cards from markdown.
+async function scrapeWithFirecrawl(query: string): Promise<any[]> {
+  const key = Deno.env.get("FIRECRAWL_API_KEY");
+  if (!key) throw new Error("FIRECRAWL_API_KEY missing");
+  const items: any[] = [];
+  for (const page of [1, 2, 3]) {
+    const url = `https://www.fiverr.com/search/gigs?query=${encodeURIComponent(query)}&page=${page}`;
+    const resp = await fetch("https://api.firecrawl.dev/v2/scrape", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        url,
+        formats: ["markdown", "links"],
+        onlyMainContent: true,
+        waitFor: 2500,
+        location: { country: "US", languages: ["en"] },
+      }),
+    });
+    if (!resp.ok) {
+      const t = await resp.text();
+      throw new Error(`Firecrawl ${resp.status}: ${t.slice(0, 200)}`);
+    }
+    const data = await resp.json();
+    const md: string = data.markdown || data.data?.markdown || "";
+    const links: string[] = data.links || data.data?.links || [];
+    // Extract gig URLs
+    const gigUrls = Array.from(new Set(
+      links
+        .filter((l) => typeof l === "string" && /fiverr\.com\/[^/]+\/[^?#]+/.test(l) && !l.includes("/search"))
+        .slice(0, 48),
+    ));
+    // Heuristic: pull blocks separated by blank lines, attempt to parse title + price
+    const blocks = md.split(/\n{2,}/);
+    for (const url of gigUrls) {
+      const handle = url.match(/fiverr\.com\/([^/?#]+)/)?.[1] || "";
+      const slug = url.match(/fiverr\.com\/[^/]+\/([^?#]+)/)?.[1]?.replace(/-/g, " ") || "";
+      const block = blocks.find((b) => b.toLowerCase().includes(slug.toLowerCase().slice(0, 25))) || "";
+      const priceMatch = block.match(/\$\s?(\d+[\d,]*)/);
+      const ratingMatch = block.match(/([45]\.\d)\s*\(?\s*(\d[\d,]*)\)?/);
+      items.push({
+        title: slug ? slug.charAt(0).toUpperCase() + slug.slice(1) : "",
+        seller: handle,
+        sellerName: handle,
+        url,
+        gigUrl: url,
+        seller_url: `https://www.fiverr.com/${handle}`,
+        price: priceMatch ? `$${priceMatch[1]}` : undefined,
+        rating: ratingMatch ? ratingMatch[1] : undefined,
+        reviewCount: ratingMatch ? Number(ratingMatch[2].replace(/,/g, "")) : undefined,
+        isFiverrChoice: /fiverr['’]s? choice/i.test(block),
+        isPro: /\bpro\b/i.test(block),
+        isTopRated: /top rated/i.test(block),
+        description: block.slice(0, 400),
+        _source: "firecrawl",
+      });
+    }
+  }
+  return items;
+}
+
 async function callAI(prompt: string, system: string): Promise<string> {
   const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
   if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY missing");
@@ -250,6 +310,24 @@ async function runResearchWork(admin: any, userId: string, projectId: string, pr
           );
         }
       }
+      if (!success) {
+        // Try Firecrawl fallback if configured
+        if (Deno.env.get("FIRECRAWL_API_KEY")) {
+          try {
+            await appendLog(admin, projectId, `   ↻ Falling back to Firecrawl for "${q}"`);
+            const fcItems = await scrapeWithFirecrawl(q);
+            if (fcItems.length) {
+              allItems.push(...fcItems.map((it: any) => ({ ...it, _query: q })));
+              await appendLog(admin, projectId, `   ✓ Firecrawl returned ${fcItems.length} gigs`);
+              success = true;
+            } else {
+              await appendLog(admin, projectId, `   ⚠ Firecrawl returned 0 results`);
+            }
+          } catch (fe: any) {
+            await appendLog(admin, projectId, `   ⚠ Firecrawl failed: ${(fe.message || String(fe)).slice(0, 160)}`);
+          }
+        }
+      }
       if (!success)
         throw new Error(
           `Scraping failed for "${q}". Last error: ${lastError || "no active keys"}. If the actor ID is invalid, update it in Settings (try "piotrv1001/fiverr-listings-scraper").`,
@@ -363,7 +441,7 @@ For "opportunity_score": be brutally honest. Saturated low-demand = 20-40. Satur
   "display_name": "...",
   "profile_title": "headline under name (max 70 chars)",
   "short_bio": "MAX 150 characters. Punchy, keyword-rich, hook-style. NEVER exceed 150 chars.",
-  "about": "600-1000 char authority-building long bio for the About section, keyword-rich, conversion-focused, human tone",
+  "about": "STRUCTURED long bio for the Fiverr 'About me' section, 600-1000 characters total. MUST be plain text with real line breaks (use \\n). Open with a warm 1-line greeting + name (e.g. 'Hi there! I'm <Name>.'). Follow with a 2-3 sentence positioning paragraph: who you help, what you specialize in (use the niche keyword naturally 2-3 times), years/experience or proof, what makes you different. Close with 1 sentence inviting the buyer to message. Conversational, confident, never robotic. NO markdown headers, NO bullet symbols — match the natural paragraph style of top Fiverr 'About me' sections.",
   "skills": ["max 15 skills"],
   "work_experience": [{"title":"...","company":"...","years":"..."}],
   "education": [{"degree":"...","institution":"...","year":"..."}],
@@ -402,7 +480,7 @@ CRITICAL: short_bio <=150 characters. profile_strength.score = sum of breakdown 
     }
   ],
   "search_tags": ["8-10 ranking tags"],
-  "description": "1000-1150 chars exactly, structure: problem→solution→why me→deliverables→CTA. Primary keyword 3-5 times naturally",
+  "description": "STRUCTURED Fiverr gig description, 1000-1150 characters total (count includes section headers, bullets and line breaks). MUST be plain text with real line breaks (\\n) and use this EXACT skeleton, adapted to the niche '${project.niche}' (do NOT mention music videos unless the niche is about music videos):\\n\\nAbout this gig\\n<1 punchy opening line that promises the outcome and uses the primary keyword>\\n\\n<2-3 sentence problem→solution paragraph that mentions the primary keyword once more, naturally>\\n\\nWhat You Get: <one line summarizing tiers/scope>\\n• <deliverable 1 with bold-style emphasis using **word** for the key benefit>\\n• <deliverable 2>\\n• <deliverable 3>\\n• <deliverable 4>\\n\\nWhy Choose Me?\\n• **Fast & Professional Communication** — <short reason>\\n• **Unlimited Revisions** until you're 100% happy\\n• **High-Quality Delivery** tailored to your goals\\n• **Niche Expertise** in <niche / sub-niche>\\n• **On-Time Delivery** every single order\\n\\nWhat I Need From You:\\n• <input 1 specific to the niche>\\n• <input 2>\\n• <input 3>\\n\\nCall to Action: Ready to <desired buyer outcome>? **Contact me** now to get started or place your order today!\\n\\nRULES: total length 1000-1150 chars; primary keyword appears 3-5 times naturally across the whole description; replace every <...> placeholder with concrete, niche-specific copy modeled on the scraped top-seller patterns; never invent fake credentials; tone confident + buyer-focused; do NOT use markdown headers (#) — use the literal section labels shown above.",
   "faqs": [{"q":"...","a":"..."}],
   "packages": {
     "basic":   {"name":"...","price":"$X","delivery_days":N,"revisions":N,"features":["..."]},
@@ -421,7 +499,7 @@ REQUIREMENTS:
 - title_variations: EXACTLY 6-8 items, each ≤80 chars, distinct angles. Only generate strong, competitive titles modeled on the scraped top sellers — do NOT produce weak/generic titles.
 - faqs: exactly 10 items.
 - thumbnail_prompts: exactly 4 items, varied styles (typography-led, product-mockup, character/face, before-after split).`,
-      "You are a Fiverr ranking expert + AI image prompt engineer. Output only valid JSON. Description must be 1000-1150 chars. Title variations must be specific and competitive.",
+      "You are a Fiverr top-seller copywriter + AI image prompt engineer. Output only valid JSON. The 'description' field MUST follow the exact section skeleton (About this gig / What You Get / Why Choose Me? / What I Need From You / Call to Action) with real \\n line breaks and bullet • markers, total 1000-1150 characters. Adapt every line to the user's niche — never default to a different niche. Title variations must be specific and competitive, modeled on real top sellers in the scraped data.",
     );
     const gig_optimization = extractJson(gigText);
 
