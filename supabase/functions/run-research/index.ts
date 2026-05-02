@@ -310,6 +310,24 @@ async function runResearchWork(admin: any, userId: string, projectId: string, pr
           );
         }
       }
+      if (!success) {
+        // Try Firecrawl fallback if configured
+        if (Deno.env.get("FIRECRAWL_API_KEY")) {
+          try {
+            await appendLog(admin, projectId, `   ↻ Falling back to Firecrawl for "${q}"`);
+            const fcItems = await scrapeWithFirecrawl(q);
+            if (fcItems.length) {
+              allItems.push(...fcItems.map((it: any) => ({ ...it, _query: q })));
+              await appendLog(admin, projectId, `   ✓ Firecrawl returned ${fcItems.length} gigs`);
+              success = true;
+            } else {
+              await appendLog(admin, projectId, `   ⚠ Firecrawl returned 0 results`);
+            }
+          } catch (fe: any) {
+            await appendLog(admin, projectId, `   ⚠ Firecrawl failed: ${(fe.message || String(fe)).slice(0, 160)}`);
+          }
+        }
+      }
       if (!success)
         throw new Error(
           `Scraping failed for "${q}". Last error: ${lastError || "no active keys"}. If the actor ID is invalid, update it in Settings (try "piotrv1001/fiverr-listings-scraper").`,
