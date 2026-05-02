@@ -59,6 +59,66 @@ async function getApifyRunLog(apiKey: string, runId: string): Promise<string> {
   }
 }
 
+// Firecrawl fallback — scrapes Fiverr search pages and parses gig cards from markdown.
+async function scrapeWithFirecrawl(query: string): Promise<any[]> {
+  const key = Deno.env.get("FIRECRAWL_API_KEY");
+  if (!key) throw new Error("FIRECRAWL_API_KEY missing");
+  const items: any[] = [];
+  for (const page of [1, 2, 3]) {
+    const url = `https://www.fiverr.com/search/gigs?query=${encodeURIComponent(query)}&page=${page}`;
+    const resp = await fetch("https://api.firecrawl.dev/v2/scrape", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        url,
+        formats: ["markdown", "links"],
+        onlyMainContent: true,
+        waitFor: 2500,
+        location: { country: "US", languages: ["en"] },
+      }),
+    });
+    if (!resp.ok) {
+      const t = await resp.text();
+      throw new Error(`Firecrawl ${resp.status}: ${t.slice(0, 200)}`);
+    }
+    const data = await resp.json();
+    const md: string = data.markdown || data.data?.markdown || "";
+    const links: string[] = data.links || data.data?.links || [];
+    // Extract gig URLs
+    const gigUrls = Array.from(new Set(
+      links
+        .filter((l) => typeof l === "string" && /fiverr\.com\/[^/]+\/[^?#]+/.test(l) && !l.includes("/search"))
+        .slice(0, 48),
+    ));
+    // Heuristic: pull blocks separated by blank lines, attempt to parse title + price
+    const blocks = md.split(/\n{2,}/);
+    for (const url of gigUrls) {
+      const handle = url.match(/fiverr\.com\/([^/?#]+)/)?.[1] || "";
+      const slug = url.match(/fiverr\.com\/[^/]+\/([^?#]+)/)?.[1]?.replace(/-/g, " ") || "";
+      const block = blocks.find((b) => b.toLowerCase().includes(slug.toLowerCase().slice(0, 25))) || "";
+      const priceMatch = block.match(/\$\s?(\d+[\d,]*)/);
+      const ratingMatch = block.match(/([45]\.\d)\s*\(?\s*(\d[\d,]*)\)?/);
+      items.push({
+        title: slug ? slug.charAt(0).toUpperCase() + slug.slice(1) : "",
+        seller: handle,
+        sellerName: handle,
+        url,
+        gigUrl: url,
+        seller_url: `https://www.fiverr.com/${handle}`,
+        price: priceMatch ? `$${priceMatch[1]}` : undefined,
+        rating: ratingMatch ? ratingMatch[1] : undefined,
+        reviewCount: ratingMatch ? Number(ratingMatch[2].replace(/,/g, "")) : undefined,
+        isFiverrChoice: /fiverr['’]s? choice/i.test(block),
+        isPro: /\bpro\b/i.test(block),
+        isTopRated: /top rated/i.test(block),
+        description: block.slice(0, 400),
+        _source: "firecrawl",
+      });
+    }
+  }
+  return items;
+}
+
 async function callAI(prompt: string, system: string): Promise<string> {
   const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
   if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY missing");
