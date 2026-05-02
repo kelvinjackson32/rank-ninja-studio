@@ -266,22 +266,36 @@ async function runResearchWork(admin: any, userId: string, projectId: string, pr
       .update({ status: "analyzing" })
       .eq("id", projectId);
 
-    // Compact scraped data for AI — include order/queue signals
-    const compacted = allItems.slice(0, 90).map((g: any) => ({
-      title: g.title || g.gigTitle,
-      seller: g.seller?.name || g.sellerName || g.seller,
-      level: g.seller?.level || g.sellerLevel,
-      isTopRated: !!(g.seller?.isTopRated || g.isTopRated),
-      isFiverrChoice: !!(g.isFiverrChoice || g.choice || g.fiverrChoice),
-      isPro: !!(g.isPro || g.seller?.isPro),
-      rating: g.rating || g.seller?.rating,
-      reviews: g.reviewCount || g.numReviews || g.reviews,
-      orders_in_queue: g.ordersInQueue || g.queue || g.activeOrders,
-      price: g.price || g.startingPrice,
-      tags: g.tags || g.searchTags,
-      description: (g.description || g.gigDescription || "").slice(0, 400),
-      query: g._query,
-    }));
+    // Compact scraped data for AI — include order/queue signals + source URLs
+    const normalizeUrl = (u: any): string | null => {
+      if (!u || typeof u !== "string") return null;
+      if (u.startsWith("http")) return u;
+      if (u.startsWith("/")) return `https://www.fiverr.com${u}`;
+      return null;
+    };
+    const compacted = allItems.slice(0, 90).map((g: any) => {
+      const sellerName = g.seller?.name || g.sellerName || (typeof g.seller === "string" ? g.seller : null) || g.username;
+      const gigUrl = normalizeUrl(g.url || g.gigUrl || g.link || g.gigLink || g.permalink);
+      const sellerUrl = normalizeUrl(g.seller?.url || g.seller?.profileUrl || g.sellerUrl || g.sellerProfileUrl)
+        || (sellerName ? `https://www.fiverr.com/${String(sellerName).replace(/^@/, "")}` : null);
+      return {
+        title: g.title || g.gigTitle,
+        seller: sellerName,
+        level: g.seller?.level || g.sellerLevel,
+        isTopRated: !!(g.seller?.isTopRated || g.isTopRated),
+        isFiverrChoice: !!(g.isFiverrChoice || g.choice || g.fiverrChoice),
+        isPro: !!(g.isPro || g.seller?.isPro),
+        rating: g.rating || g.seller?.rating,
+        reviews: g.reviewCount || g.numReviews || g.reviews,
+        orders_in_queue: g.ordersInQueue || g.queue || g.activeOrders,
+        price: g.price || g.startingPrice,
+        tags: g.tags || g.searchTags,
+        description: (g.description || g.gigDescription || "").slice(0, 400),
+        gig_url: gigUrl,
+        seller_url: sellerUrl,
+        query: g._query,
+      };
+    });
 
     const dataBlob = JSON.stringify(compacted).slice(0, 38000);
 
@@ -310,6 +324,8 @@ async function runResearchWork(admin: any, userId: string, projectId: string, pr
       "reviews": 1234,
       "orders_in_queue": 45,
       "starting_price": "$X",
+      "gig_url": "exact gig_url copied from the input data for this seller (must start with https://www.fiverr.com). If unknown, use empty string.",
+      "seller_url": "exact seller_url copied from the input data (must start with https://www.fiverr.com). If unknown, use empty string.",
       "why_ranking": "1 sentence: why THIS gig ranks (keyword placement, price, packaging, social proof, niche angle)",
       "what_to_copy": "1 actionable tactic the user should steal from them"
     }
@@ -317,11 +333,28 @@ async function runResearchWork(admin: any, userId: string, projectId: string, pr
   "key_learnings": ["6-10 plain-English lessons written as direct advice"]
 }
 
-For "top_sellers": pick the 5 BEST performers, prioritizing: Fiverr's Choice → Top Rated → Pro → highest active orders/queue → highest review counts. Use REAL names and titles.
+For "top_sellers": pick the 5 BEST performers, prioritizing: Fiverr's Choice → Top Rated → Pro → highest active orders/queue → highest review counts. Use REAL names, titles, AND copy the gig_url + seller_url EXACTLY from the matching entry in the input data — never invent URLs.
 For "opportunity_score": be brutally honest. Saturated low-demand = 20-40. Saturated high-demand = 50-65. Healthy demand with differentiation room = 70-90.`,
-      "You are an expert Fiverr SEO analyst. Output only valid JSON, no prose. Be specific and reference real data.",
+      "You are an expert Fiverr SEO analyst. Output only valid JSON, no prose. Be specific and reference real data. When the input contains gig_url/seller_url, copy them verbatim into top_sellers — do not invent or guess URLs.",
     );
     const insights = extractJson(insightsText);
+
+    // Backfill / verify source URLs from real scraped data
+    if (Array.isArray(insights?.top_sellers)) {
+      const norm = (s: any) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+      insights.top_sellers = insights.top_sellers.map((s: any) => {
+        const sn = norm(s.seller_name);
+        const gt = norm(s.gig_title);
+        const match = compacted.find((c) => sn && norm(c.seller) === sn)
+          || compacted.find((c) => gt && norm(c.title) && (norm(c.title).includes(gt) || gt.includes(norm(c.title))));
+        const gigUrl = (typeof s.gig_url === "string" && s.gig_url.startsWith("http") ? s.gig_url : null) || match?.gig_url || null;
+        const sellerUrl = (typeof s.seller_url === "string" && s.seller_url.startsWith("http") ? s.seller_url : null)
+          || match?.seller_url
+          || (s.seller_name ? `https://www.fiverr.com/${String(s.seller_name).replace(/^@/, "").replace(/\s+/g, "")}` : null);
+        const searchUrl = `https://www.fiverr.com/search/gigs?query=${encodeURIComponent(s.gig_title || s.seller_name || project.niche)}`;
+        return { ...s, gig_url: gigUrl || searchUrl, seller_url: sellerUrl, source_search_url: searchUrl };
+      });
+    }
 
     await appendLog(admin, projectId, `✏️ Generating profile + strength score...`);
     const profileText = await callAI(
