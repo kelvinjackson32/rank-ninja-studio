@@ -21,9 +21,12 @@ const LIMITS: Record<string, number> = {
 
 const Project = () => {
   const { id } = useParams();
+  const { user } = useAuth();
+  const nav = useNavigate();
   const [project, setProject] = useState<any>(null);
   const [result, setResult] = useState<any>(null);
   const [rerunning, setRerunning] = useState(false);
+  const [building, setBuilding] = useState<string | null>(null);
   const logRef = useRef<HTMLDivElement>(null);
 
   const load = async () => {
