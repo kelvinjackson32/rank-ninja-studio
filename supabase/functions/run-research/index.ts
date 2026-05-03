@@ -379,8 +379,11 @@ async function runResearchWork(admin: any, userId: string, projectId: string, pr
 
     await appendLog(admin, projectId, `🤖 AI analyzing winning patterns across pages 1-3...`);
 
+    // Variation seed so each Re-run produces fresh niche angles + edited titles/sellers/etc.
+    const variationSeed = Math.floor(Math.random() * 1_000_000);
+
     const insightsText = await callAI(
-      `Analyze these REAL Fiverr gigs (pages 1-3) scraped for niche "${project.niche}":\n${dataBlob}\n\nReturn JSON with these EXACT keys (no extras):
+      `Analyze these REAL Fiverr gigs (pages 1-3) scraped for niche "${project.niche}":\n${dataBlob}\n\nVariation seed (use to ensure this run produces DIFFERENT niche_angles than any previous run): ${variationSeed}\n\nReturn JSON with these EXACT keys (no extras):
 {
   "competition_level": "low|medium|high|saturated",
   "competition_summary": "2-3 sentences on the market state",
@@ -388,6 +391,16 @@ async function runResearchWork(admin: any, userId: string, projectId: string, pr
   "opportunity_reasoning": "2-3 sentences explaining the opportunity_score honestly",
   "average_starting_price": "$X",
   "average_top_orders": "approximate average orders/queue across the strongest gigs, e.g. '180+ active orders' or 'unknown'",
+  "niche_angles": [
+    {
+      "title": "specific service angle the user could offer (NOT a gig title — a focused sub-niche / service positioning, max 70 chars). Must be a COMBINATION/refinement of the broad niche '${project.niche}' that has VALIDATED demand on Fiverr but LOWER competition than the saturated head term. Examples of good angles: 'Faceless YouTube shorts for finance creators', 'Minimalist logo for SaaS startups', 'AI UGC ads for skincare brands'. Bad: just repeating '${project.niche}'.",
+      "demand_signal": "1 sentence citing what in the scraped data proves buyers want this (orders in queue, repeat patterns, gig count vs review velocity)",
+      "competition_signal": "1 sentence on why this angle is LESS saturated than the head term (fewer Top Rated holding it, gap in tag coverage, etc.)",
+      "why_pick_this": "1 sentence: how a NEW seller can realistically rank and convert here",
+      "estimated_competition": "low|medium",
+      "primary_keyword": "the exact keyword phrase to target"
+    }
+  ],
   "top_keywords": ["10-15 high-ranking keywords pulled from real titles/tags"],
   "keyword_expansion": ["10-15 long-tail and secondary keyword variations a NEW seller should target — different from top_keywords, lower-competition angles, buyer-intent phrases"],
   "winning_patterns": ["5-8 patterns the best gigs share"],
@@ -412,8 +425,9 @@ async function runResearchWork(admin: any, userId: string, projectId: string, pr
 }
 
 For "top_sellers": pick the 5 BEST performers, prioritizing: Fiverr's Choice → Top Rated → Pro → highest active orders/queue → highest review counts. Use REAL names, titles, AND copy the gig_url + seller_url EXACTLY from the matching entry in the input data — never invent URLs.
-For "opportunity_score": be brutally honest. Saturated low-demand = 20-40. Saturated high-demand = 50-65. Healthy demand with differentiation room = 70-90.`,
-      "You are an expert Fiverr SEO analyst. Output only valid JSON, no prose. Be specific and reference real data. When the input contains gig_url/seller_url, copy them verbatim into top_sellers — do not invent or guess URLs.",
+For "opportunity_score": be brutally honest. Saturated low-demand = 20-40. Saturated high-demand = 50-65. Healthy demand with differentiation room = 70-90.
+For "niche_angles": return EXACTLY 3 distinct angles. Each must be a REFINEMENT/COMBINATION of the broad niche the user submitted, NOT a generic restatement. Pick angles that have proven demand in the scraped data (visible orders/reviews/queues) BUT are not dominated by Top Rated / Pro / Fiverr's Choice — i.e. realistic for a brand-new seller to break into. Avoid suggesting the most saturated head terms even if they have demand. Use the variation seed so this run produces different angles than previous runs would.`,
+      "You are an expert Fiverr SEO analyst. Output only valid JSON, no prose. Be specific and reference real data. When the input contains gig_url/seller_url, copy them verbatim into top_sellers — do not invent or guess URLs. Each Re-run must use the variation seed to surface DIFFERENT niche_angles than prior runs.",
     );
     const insights = extractJson(insightsText);
 
@@ -469,7 +483,7 @@ CRITICAL: short_bio <=150 characters. profile_strength.score = sum of breakdown 
 
     await appendLog(admin, projectId, `🎯 Generating gig + title variations + thumbnail prompts...`);
     const gigText = await callAI(
-      `Based on the research for "${project.niche}":\nInsights: ${JSON.stringify(insights)}\nReal top gigs: ${dataBlob.slice(0, 12000)}\n\nGenerate the BEST possible Fiverr gig PLUS 6-8 strong alternative title variations and 4 thumbnail prompts. Return JSON:
+      `Based on the research for "${project.niche}":\nInsights: ${JSON.stringify(insights)}\nReal top gigs: ${dataBlob.slice(0, 12000)}\n\nVariation seed (use to ensure each re-run produces NEW gig_title, title_variations, packages, FAQ wording and thumbnail prompts): ${variationSeed}\n\nGenerate the BEST possible Fiverr gig PLUS 6-8 strong alternative title variations, gig metadata, requirements, and 4 thumbnail prompts. Return JSON:
 {
   "gig_title": "max 80 chars, primary keyword at start",
   "title_variations": [
@@ -479,8 +493,20 @@ CRITICAL: short_bio <=150 characters. profile_strength.score = sum of breakdown 
       "why_it_works": "1 sentence tied to real top-seller patterns from the data"
     }
   ],
+  "category": {
+    "category": "Top-level Fiverr category most chosen by the scraped top sellers for this niche (e.g. 'Video & Animation', 'Graphics & Design', 'Programming & Tech', 'Writing & Translation', 'Digital Marketing', 'Music & Audio', 'Business', 'AI Services'). Pick the BEST fit for niche '${project.niche}'.",
+    "subcategory": "Exact Fiverr sub-category top sellers in the scraped data use most for this niche.",
+    "service_type": "The 'Service type' Fiverr asks for (e.g. 'AI Video', 'Logo Design', 'WordPress Development'). Match what top sellers in the scraped data picked.",
+    "why": "1 sentence: why this category/sub-category/service_type combo (cite the top-seller pattern observed)."
+  },
+  "gig_metadata": [
+    { "field": "field name Fiverr asks (e.g. 'Style', 'Software', 'Voice Gender', 'Platform')", "recommended_values": ["value1","value2"], "why": "1 sentence: which top sellers picked this and why it helps ranking" }
+  ],
   "search_tags": ["8-10 ranking tags"],
-  "description": "STRUCTURED Fiverr gig description, 1000-1150 characters total (count includes section headers, bullets and line breaks). MUST be plain text with real line breaks (\\n) and use this EXACT skeleton, adapted to the niche '${project.niche}' (do NOT mention music videos unless the niche is about music videos):\\n\\nAbout this gig\\n<1 punchy opening line that promises the outcome and uses the primary keyword>\\n\\n<2-3 sentence problem→solution paragraph that mentions the primary keyword once more, naturally>\\n\\nWhat You Get: <one line summarizing tiers/scope>\\n• <deliverable 1 with bold-style emphasis using **word** for the key benefit>\\n• <deliverable 2>\\n• <deliverable 3>\\n• <deliverable 4>\\n\\nWhy Choose Me?\\n• **Fast & Professional Communication** — <short reason>\\n• **Unlimited Revisions** until you're 100% happy\\n• **High-Quality Delivery** tailored to your goals\\n• **Niche Expertise** in <niche / sub-niche>\\n• **On-Time Delivery** every single order\\n\\nWhat I Need From You:\\n• <input 1 specific to the niche>\\n• <input 2>\\n• <input 3>\\n\\nCall to Action: Ready to <desired buyer outcome>? **Contact me** now to get started or place your order today!\\n\\nRULES: total length 1000-1150 chars; primary keyword appears 3-5 times naturally across the whole description; replace every <...> placeholder with concrete, niche-specific copy modeled on the scraped top-seller patterns; never invent fake credentials; tone confident + buyer-focused; do NOT use markdown headers (#) — use the literal section labels shown above.",
+  "description": "STRUCTURED Fiverr gig description, 1000-1150 characters total. MUST be plain text with real line breaks (\\n) and use this EXACT skeleton, adapted to the niche '${project.niche}':\\n\\nAbout this gig\\n<1 punchy opening line that promises the outcome and uses the primary keyword>\\n\\n<2-3 sentence problem→solution paragraph that mentions the primary keyword once more, naturally>\\n\\nWhat You Get: <one line summarizing tiers/scope>\\n• <deliverable 1 with **bold** key benefit>\\n• <deliverable 2>\\n• <deliverable 3>\\n• <deliverable 4>\\n\\nWhy Choose Me?\\n• **Fast & Professional Communication** — <short reason>\\n• **Unlimited Revisions** until you're 100% happy\\n• **High-Quality Delivery** tailored to your goals\\n• **Niche Expertise** in <niche / sub-niche>\\n• **On-Time Delivery** every single order\\n\\nWhat I Need From You:\\n• <input 1 specific to the niche>\\n• <input 2>\\n• <input 3>\\n\\nCall to Action: Ready to <desired buyer outcome>? **Contact me** now to get started or place your order today!\\n\\nRULES: 1000-1150 chars; primary keyword 3-5 times naturally; no markdown headers (#).",
+  "buyer_requirements": [
+    { "question": "exact question to ask buyer at order start, niche-specific", "type": "free_text|multiple_choice|attachment", "required": true, "options": ["only for multiple_choice"] }
+  ],
   "faqs": [{"q":"...","a":"..."}],
   "packages": {
     "basic":   {"name":"...","price":"$X","delivery_days":N,"revisions":N,"features":["..."]},
@@ -489,17 +515,19 @@ CRITICAL: short_bio <=150 characters. profile_strength.score = sum of breakdown 
   },
   "thumbnail_prompts": [
     {
-      "style": "e.g. 'Bold typography + product mockup'",
-      "prompt": "Detailed Midjourney/Flux prompt (60-120 words): subject, composition, color palette, lighting, typography hint, --ar 4:3 --style raw, no watermark"
+      "style": "e.g. 'Bold typography + product mockup' — modeled on what top sellers in this niche actually use to win clicks",
+      "prompt": "Detailed image-gen prompt (80-140 words) sized for Fiverr's gig image of EXACTLY 1280x769 pixels. MUST include: subject specific to the niche '${project.niche}', composition for a 1280x769 horizontal canvas with safe margins, color palette inspired by top-converting Fiverr thumbnails in this niche (name the colors), lighting, 3-5 short bold headline words to overlay (high contrast, sans-serif, large), focal point (product/face/example), trust elements (badges, stars, before/after split if relevant). End with: --ar 1280:769 --no watermark, blurry, low-res, lorem-ipsum text, extra fingers --style raw"
     }
   ]
 }
 
 REQUIREMENTS:
-- title_variations: EXACTLY 6-8 items, each ≤80 chars, distinct angles. Only generate strong, competitive titles modeled on the scraped top sellers — do NOT produce weak/generic titles.
+- title_variations: EXACTLY 6-8 items, each ≤80 chars, distinct angles modeled on the scraped top sellers.
+- gig_metadata: 4-7 items modeled on the actual fields/values top sellers picked for this niche.
+- buyer_requirements: 4-6 niche-specific items (never generic).
 - faqs: exactly 10 items.
-- thumbnail_prompts: exactly 4 items, varied styles (typography-led, product-mockup, character/face, before-after split).`,
-      "You are a Fiverr top-seller copywriter + AI image prompt engineer. Output only valid JSON. The 'description' field MUST follow the exact section skeleton (About this gig / What You Get / Why Choose Me? / What I Need From You / Call to Action) with real \\n line breaks and bullet • markers, total 1000-1150 characters. Adapt every line to the user's niche — never default to a different niche. Title variations must be specific and competitive, modeled on real top sellers in the scraped data.",
+- thumbnail_prompts: exactly 4 items, varied styles (typography-led, product-mockup, character/face, before-after split). EVERY prompt enforces 1280x769 sizing and reflects winning patterns for THIS niche.`,
+      "You are a Fiverr top-seller copywriter + AI image prompt engineer. Output only valid JSON. The 'description' MUST follow the exact section skeleton with real \\n line breaks and bullet • markers, total 1000-1150 characters. Adapt every line to the user's niche. Title variations and thumbnail prompts must be specific, competitive, and modeled on real top sellers in the scraped data. Each Re-run uses the variation seed to produce DIFFERENT outputs.",
     );
     const gig_optimization = extractJson(gigText);
 

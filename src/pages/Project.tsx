@@ -144,6 +144,7 @@ const Project = () => {
             </TabsList>
 
             <TabsContent value="insights" className="mt-6 space-y-4">
+              <NicheAnglesView insights={result.insights} copy={copy} />
               <InsightsView insights={result.insights} scrapedCount={result.scraped_data?.count || 0} />
             </TabsContent>
 
@@ -174,6 +175,42 @@ const Project = () => {
         )}
       </div>
     </AppShell>
+  );
+};
+
+const NicheAnglesView = ({ insights, copy }: any) => {
+  const angles = insights?.niche_angles || [];
+  if (angles.length === 0) return null;
+  return (
+    <div className="surface-card rounded-lg p-5 border-primary/40 bg-primary/5">
+      <div className="flex items-center gap-2 mb-2">
+        <Sparkles className="w-4 h-4 text-primary" />
+        <h3 className="font-semibold text-sm uppercase tracking-wider font-mono text-primary">Pick your winning angle</h3>
+      </div>
+      <p className="text-sm text-muted-foreground mb-4">3 refined sub-niches with proven demand but lower competition than the head term. Hit <b>Re-run</b> to get fresh angles.</p>
+      <div className="grid md:grid-cols-3 gap-3">
+        {angles.slice(0, 3).map((a: any, i: number) => (
+          <div key={i} className="rounded-lg border border-border bg-background/40 p-4 flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <span className="font-mono text-xs text-primary">#{i + 1}</span>
+              {a.estimated_competition && (
+                <Badge variant="outline" className={`font-mono text-[10px] capitalize ${a.estimated_competition === "low" ? "border-success/40 text-success" : "border-warning/40 text-warning"}`}>{a.estimated_competition} comp</Badge>
+              )}
+            </div>
+            <div className="font-bold text-sm leading-snug">{a.title}</div>
+            {a.primary_keyword && (
+              <div className="text-[11px] font-mono text-muted-foreground">kw: <span className="text-secondary">{a.primary_keyword}</span></div>
+            )}
+            {a.demand_signal && <div className="text-xs text-foreground/80"><span className="text-success">Demand:</span> {a.demand_signal}</div>}
+            {a.competition_signal && <div className="text-xs text-foreground/80"><span className="text-primary">Gap:</span> {a.competition_signal}</div>}
+            {a.why_pick_this && <div className="text-xs text-muted-foreground border-l-2 border-primary/40 pl-2 mt-1">{a.why_pick_this}</div>}
+            <Button size="sm" variant="outline" className="mt-2 h-8" onClick={() => copy(`${a.title}\nKeyword: ${a.primary_keyword || ""}`)}>
+              <Copy className="w-3 h-3 mr-1" />Copy angle
+            </Button>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 };
 
@@ -541,6 +578,36 @@ const GigView = ({ gig, resultId, onUpdate, copy }: any) => {
   const f = (label: string, key: string, multi = false) => <Field label={label} value={gig[key]} resultId={resultId} section="gig" fieldKey={key} onUpdate={onUpdate} copy={copy} multiline={multi} />;
   return (
     <>
+      {gig.category && (
+        <div className="surface-card rounded-lg p-5 border-primary/30">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-semibold text-sm uppercase tracking-wider font-mono text-primary">Category & Service Type</h3>
+            <Button size="icon" variant="ghost" onClick={() => copy(`${gig.category.category} > ${gig.category.subcategory} > ${gig.category.service_type}`)}><Copy className="w-4 h-4" /></Button>
+          </div>
+          <div className="grid sm:grid-cols-3 gap-3 text-sm">
+            <div><div className="text-[10px] uppercase font-mono text-muted-foreground">Category</div><div className="font-semibold">{gig.category.category}</div></div>
+            <div><div className="text-[10px] uppercase font-mono text-muted-foreground">Sub-category</div><div className="font-semibold">{gig.category.subcategory}</div></div>
+            <div><div className="text-[10px] uppercase font-mono text-muted-foreground">Service type</div><div className="font-semibold">{gig.category.service_type}</div></div>
+          </div>
+          {gig.category.why && <div className="text-xs text-muted-foreground mt-3 border-l-2 border-primary/40 pl-3">{gig.category.why}</div>}
+        </div>
+      )}
+      {Array.isArray(gig.gig_metadata) && gig.gig_metadata.length > 0 && (
+        <div className="surface-card rounded-lg p-5">
+          <h3 className="font-semibold text-sm uppercase tracking-wider font-mono text-muted-foreground mb-3">Gig Metadata (top-seller picks)</h3>
+          <div className="space-y-3">
+            {gig.gig_metadata.map((m: any, i: number) => (
+              <div key={i} className="border-l-2 border-secondary/40 pl-3">
+                <div className="font-medium text-sm">{m.field}</div>
+                <div className="flex flex-wrap gap-1 mt-1">
+                  {(m.recommended_values || []).map((v: string, j: number) => <Badge key={j} className="bg-secondary/10 text-secondary border-secondary/30 text-[11px]">{v}</Badge>)}
+                </div>
+                {m.why && <div className="text-xs text-muted-foreground mt-1">{m.why}</div>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       {f("Gig Title (≤80 chars)", "gig_title")}
       <div className="surface-card rounded-lg p-5">
         <div className="flex items-center justify-between mb-3">
@@ -552,6 +619,29 @@ const GigView = ({ gig, resultId, onUpdate, copy }: any) => {
         </div>
       </div>
       {f("Description (≤1200 chars)", "description", true)}
+      {Array.isArray(gig.buyer_requirements) && gig.buyer_requirements.length > 0 && (
+        <div className="surface-card rounded-lg p-5">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-semibold text-sm uppercase tracking-wider font-mono text-muted-foreground">Buyer Requirements (order start questions)</h3>
+            <Button size="icon" variant="ghost" onClick={() => copy((gig.buyer_requirements || []).map((r: any, i: number) => `${i + 1}. ${r.question} [${r.type}${r.required ? ", required" : ""}]${r.options?.length ? ` — options: ${r.options.join(", ")}` : ""}`).join("\n"))}><Copy className="w-4 h-4" /></Button>
+          </div>
+          <ol className="space-y-3 text-sm">
+            {gig.buyer_requirements.map((r: any, i: number) => (
+              <li key={i} className="border-l-2 border-secondary/40 pl-3">
+                <div className="font-medium">{i + 1}. {r.question}</div>
+                <div className="text-[11px] font-mono text-muted-foreground mt-0.5">
+                  {r.type}{r.required ? " · required" : " · optional"}
+                </div>
+                {r.options?.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {r.options.map((o: string, j: number) => <Badge key={j} variant="outline" className="text-[10px] font-mono">{o}</Badge>)}
+                  </div>
+                )}
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
       <div className="surface-card rounded-lg p-5">
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-semibold text-sm uppercase tracking-wider font-mono text-muted-foreground"><MessageSquare className="w-4 h-4 inline mr-1" />FAQs</h3>
