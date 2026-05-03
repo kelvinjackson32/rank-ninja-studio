@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, Copy, Loader2, Sparkles, RefreshCw, Tag, MessageSquare, Package, User, Download, Trophy, Lightbulb, Star, RotateCw, Image as ImageIcon, Type, Search, Gauge, ExternalLink } from "lucide-react";
+import { useParams, Link, useNavigate } from "react-router-dom";
+import { ArrowLeft, Copy, Loader2, Sparkles, RefreshCw, Tag, MessageSquare, Package, User, Download, Trophy, Lightbulb, Star, RotateCw, Image as ImageIcon, Type, Search, Gauge, ExternalLink, Rocket } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -20,9 +21,12 @@ const LIMITS: Record<string, number> = {
 
 const Project = () => {
   const { id } = useParams();
+  const { user } = useAuth();
+  const nav = useNavigate();
   const [project, setProject] = useState<any>(null);
   const [result, setResult] = useState<any>(null);
   const [rerunning, setRerunning] = useState(false);
+  const [building, setBuilding] = useState<string | null>(null);
   const logRef = useRef<HTMLDivElement>(null);
 
   const load = async () => {
@@ -59,6 +63,21 @@ const Project = () => {
       toast.success("Research re-launched");
       load();
     } catch (e: any) { toast.error(e.message); } finally { setRerunning(false); }
+  };
+
+  const buildFromAngle = async (angleTitle: string, primaryKeyword?: string) => {
+    if (!user || !angleTitle) return;
+    setBuilding(angleTitle);
+    try {
+      const sec = primaryKeyword && primaryKeyword !== angleTitle ? [primaryKeyword] : [];
+      const { data: created, error } = await supabase.from("projects").insert({
+        user_id: user.id, niche: angleTitle, secondary_keywords: sec, status: "pending",
+      }).select().single();
+      if (error) throw error;
+      supabase.functions.invoke("run-research", { body: { projectId: created.id } }).catch(console.error);
+      toast.success("New gig research launched");
+      nav(`/app/projects/${created.id}`);
+    } catch (e: any) { toast.error(e.message); } finally { setBuilding(null); }
   };
 
   const markdown = useMemo(() => result ? buildMarkdown(project, result) : "", [project, result]);
@@ -144,7 +163,7 @@ const Project = () => {
             </TabsList>
 
             <TabsContent value="insights" className="mt-6 space-y-4">
-              <NicheAnglesView insights={result.insights} copy={copy} />
+              <NicheAnglesView insights={result.insights} copy={copy} onBuild={buildFromAngle} building={building} />
               <InsightsView insights={result.insights} scrapedCount={result.scraped_data?.count || 0} />
             </TabsContent>
 
@@ -153,7 +172,7 @@ const Project = () => {
             </TabsContent>
 
             <TabsContent value="titles" className="mt-6 space-y-4">
-              <TitleVariationsView gig={result.gig_optimization} copy={copy} />
+              <TitleVariationsView gig={result.gig_optimization} copy={copy} onBuild={buildFromAngle} building={building} />
             </TabsContent>
 
             <TabsContent value="keywords" className="mt-6 space-y-4">
@@ -178,7 +197,7 @@ const Project = () => {
   );
 };
 
-const NicheAnglesView = ({ insights, copy }: any) => {
+const NicheAnglesView = ({ insights, copy, onBuild, building }: any) => {
   const angles = insights?.niche_angles || [];
   if (angles.length === 0) return null;
   return (
@@ -187,7 +206,7 @@ const NicheAnglesView = ({ insights, copy }: any) => {
         <Sparkles className="w-4 h-4 text-primary" />
         <h3 className="font-semibold text-sm uppercase tracking-wider font-mono text-primary">Pick your winning angle</h3>
       </div>
-      <p className="text-sm text-muted-foreground mb-4">3 refined sub-niches with proven demand but lower competition than the head term. Hit <b>Re-run</b> to get fresh angles.</p>
+      <p className="text-sm text-muted-foreground mb-4">3 refined sub-niches with proven demand but lower competition than the head term. Click <b>Build this gig</b> to generate a full profile + gig package on the chosen angle.</p>
       <div className="grid md:grid-cols-3 gap-3">
         {angles.slice(0, 3).map((a: any, i: number) => (
           <div key={i} className="rounded-lg border border-border bg-background/40 p-4 flex flex-col gap-2">
@@ -204,9 +223,15 @@ const NicheAnglesView = ({ insights, copy }: any) => {
             {a.demand_signal && <div className="text-xs text-foreground/80"><span className="text-success">Demand:</span> {a.demand_signal}</div>}
             {a.competition_signal && <div className="text-xs text-foreground/80"><span className="text-primary">Gap:</span> {a.competition_signal}</div>}
             {a.why_pick_this && <div className="text-xs text-muted-foreground border-l-2 border-primary/40 pl-2 mt-1">{a.why_pick_this}</div>}
-            <Button size="sm" variant="outline" className="mt-2 h-8" onClick={() => copy(`${a.title}\nKeyword: ${a.primary_keyword || ""}`)}>
-              <Copy className="w-3 h-3 mr-1" />Copy angle
-            </Button>
+            <div className="flex gap-2 mt-2">
+              <Button size="sm" className="flex-1 h-8 bg-gradient-to-r from-primary to-secondary text-primary-foreground" disabled={building === a.title} onClick={() => onBuild(a.title, a.primary_keyword)}>
+                {building === a.title ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Rocket className="w-3 h-3 mr-1" />}
+                Build this gig
+              </Button>
+              <Button size="sm" variant="outline" className="h-8" onClick={() => copy(`${a.title}\nKeyword: ${a.primary_keyword || ""}`)}>
+                <Copy className="w-3 h-3" />
+              </Button>
+            </div>
           </div>
         ))}
       </div>
@@ -456,7 +481,7 @@ const ProfileStrengthCard = ({ strength }: any) => {
   );
 };
 
-const TitleVariationsView = ({ gig, copy }: any) => {
+const TitleVariationsView = ({ gig, copy, onBuild, building }: any) => {
   const variations = gig?.title_variations || [];
   if (variations.length === 0) return <div className="surface-card rounded-lg p-8 text-center text-muted-foreground">No title variations yet. Re-run research to generate them.</div>;
   return (
@@ -466,11 +491,12 @@ const TitleVariationsView = ({ gig, copy }: any) => {
           <Type className="w-4 h-4 text-primary" />
           <h3 className="font-semibold text-sm uppercase tracking-wider font-mono text-primary">{variations.length} competitive title angles</h3>
         </div>
-        <p className="text-sm text-muted-foreground">Each one models a real winning pattern from your scraped top sellers. Pick the angle that fits your style.</p>
+        <p className="text-sm text-muted-foreground">Each one models a real winning pattern from your scraped top sellers. Click <b>Build this gig</b> to spin up a brand-new gig + profile package built around that exact title.</p>
       </div>
       {variations.map((v: any, i: number) => {
         const len = (v.title || "").length;
         const over = len > 80;
+        const isBuilding = building === v.title;
         return (
           <div key={i} className="surface-card rounded-lg p-5">
             <div className="flex items-start justify-between gap-3 mb-2">
@@ -484,7 +510,13 @@ const TitleVariationsView = ({ gig, copy }: any) => {
               <Button size="icon" variant="ghost" onClick={() => copy(v.title)}><Copy className="w-4 h-4" /></Button>
             </div>
             {v.why_it_works && <div className="text-sm text-muted-foreground mt-2 border-l-2 border-primary/40 pl-3">{v.why_it_works}</div>}
-            <div className={`text-xs font-mono mt-2 ${over ? "text-destructive" : "text-muted-foreground"}`}>{len}/80 chars{over ? " — exceeds Fiverr limit" : ""}</div>
+            <div className="flex items-center justify-between gap-3 mt-3 flex-wrap">
+              <div className={`text-xs font-mono ${over ? "text-destructive" : "text-muted-foreground"}`}>{len}/80 chars{over ? " — exceeds Fiverr limit" : ""}</div>
+              <Button size="sm" className="bg-gradient-to-r from-primary to-secondary text-primary-foreground" disabled={isBuilding} onClick={() => onBuild(v.title)}>
+                {isBuilding ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Rocket className="w-3 h-3 mr-1" />}
+                Build this gig
+              </Button>
+            </div>
           </div>
         );
       })}
