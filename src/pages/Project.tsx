@@ -178,6 +178,42 @@ const Project = () => {
   );
 };
 
+const NicheAnglesView = ({ insights, copy }: any) => {
+  const angles = insights?.niche_angles || [];
+  if (angles.length === 0) return null;
+  return (
+    <div className="surface-card rounded-lg p-5 border-primary/40 bg-primary/5">
+      <div className="flex items-center gap-2 mb-2">
+        <Sparkles className="w-4 h-4 text-primary" />
+        <h3 className="font-semibold text-sm uppercase tracking-wider font-mono text-primary">Pick your winning angle</h3>
+      </div>
+      <p className="text-sm text-muted-foreground mb-4">3 refined sub-niches with proven demand but lower competition than the head term. Hit <b>Re-run</b> to get fresh angles.</p>
+      <div className="grid md:grid-cols-3 gap-3">
+        {angles.slice(0, 3).map((a: any, i: number) => (
+          <div key={i} className="rounded-lg border border-border bg-background/40 p-4 flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <span className="font-mono text-xs text-primary">#{i + 1}</span>
+              {a.estimated_competition && (
+                <Badge variant="outline" className={`font-mono text-[10px] capitalize ${a.estimated_competition === "low" ? "border-success/40 text-success" : "border-warning/40 text-warning"}`}>{a.estimated_competition} comp</Badge>
+              )}
+            </div>
+            <div className="font-bold text-sm leading-snug">{a.title}</div>
+            {a.primary_keyword && (
+              <div className="text-[11px] font-mono text-muted-foreground">kw: <span className="text-secondary">{a.primary_keyword}</span></div>
+            )}
+            {a.demand_signal && <div className="text-xs text-foreground/80"><span className="text-success">Demand:</span> {a.demand_signal}</div>}
+            {a.competition_signal && <div className="text-xs text-foreground/80"><span className="text-primary">Gap:</span> {a.competition_signal}</div>}
+            {a.why_pick_this && <div className="text-xs text-muted-foreground border-l-2 border-primary/40 pl-2 mt-1">{a.why_pick_this}</div>}
+            <Button size="sm" variant="outline" className="mt-2 h-8" onClick={() => copy(`${a.title}\nKeyword: ${a.primary_keyword || ""}`)}>
+              <Copy className="w-3 h-3 mr-1" />Copy angle
+            </Button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
 const InsightsView = ({ insights, scrapedCount }: any) => {
   if (!insights) return null;
   const score = insights.opportunity_score;
