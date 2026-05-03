@@ -144,6 +144,7 @@ const Project = () => {
             </TabsList>
 
             <TabsContent value="insights" className="mt-6 space-y-4">
+              <NicheAnglesView insights={result.insights} copy={copy} />
               <InsightsView insights={result.insights} scrapedCount={result.scraped_data?.count || 0} />
             </TabsContent>
 
