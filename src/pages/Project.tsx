@@ -163,7 +163,7 @@ const Project = () => {
             </TabsList>
 
             <TabsContent value="insights" className="mt-6 space-y-4">
-              <NicheAnglesView insights={result.insights} copy={copy} />
+              <NicheAnglesView insights={result.insights} copy={copy} onBuild={buildFromAngle} building={building} />
               <InsightsView insights={result.insights} scrapedCount={result.scraped_data?.count || 0} />
             </TabsContent>
 
@@ -172,7 +172,7 @@ const Project = () => {
             </TabsContent>
 
             <TabsContent value="titles" className="mt-6 space-y-4">
-              <TitleVariationsView gig={result.gig_optimization} copy={copy} />
+              <TitleVariationsView gig={result.gig_optimization} copy={copy} onBuild={buildFromAngle} building={building} />
             </TabsContent>
 
             <TabsContent value="keywords" className="mt-6 space-y-4">
