@@ -619,6 +619,29 @@ const GigView = ({ gig, resultId, onUpdate, copy }: any) => {
         </div>
       </div>
       {f("Description (≤1200 chars)", "description", true)}
+      {Array.isArray(gig.buyer_requirements) && gig.buyer_requirements.length > 0 && (
+        <div className="surface-card rounded-lg p-5">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-semibold text-sm uppercase tracking-wider font-mono text-muted-foreground">Buyer Requirements (order start questions)</h3>
+            <Button size="icon" variant="ghost" onClick={() => copy((gig.buyer_requirements || []).map((r: any, i: number) => `${i + 1}. ${r.question} [${r.type}${r.required ? ", required" : ""}]${r.options?.length ? ` — options: ${r.options.join(", ")}` : ""}`).join("\n"))}><Copy className="w-4 h-4" /></Button>
+          </div>
+          <ol className="space-y-3 text-sm">
+            {gig.buyer_requirements.map((r: any, i: number) => (
+              <li key={i} className="border-l-2 border-secondary/40 pl-3">
+                <div className="font-medium">{i + 1}. {r.question}</div>
+                <div className="text-[11px] font-mono text-muted-foreground mt-0.5">
+                  {r.type}{r.required ? " · required" : " · optional"}
+                </div>
+                {r.options?.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {r.options.map((o: string, j: number) => <Badge key={j} variant="outline" className="text-[10px] font-mono">{o}</Badge>)}
+                  </div>
+                )}
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
       <div className="surface-card rounded-lg p-5">
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-semibold text-sm uppercase tracking-wider font-mono text-muted-foreground"><MessageSquare className="w-4 h-4 inline mr-1" />FAQs</h3>
