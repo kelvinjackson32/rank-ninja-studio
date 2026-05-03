@@ -578,6 +578,36 @@ const GigView = ({ gig, resultId, onUpdate, copy }: any) => {
   const f = (label: string, key: string, multi = false) => <Field label={label} value={gig[key]} resultId={resultId} section="gig" fieldKey={key} onUpdate={onUpdate} copy={copy} multiline={multi} />;
   return (
     <>
+      {gig.category && (
+        <div className="surface-card rounded-lg p-5 border-primary/30">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-semibold text-sm uppercase tracking-wider font-mono text-primary">Category & Service Type</h3>
+            <Button size="icon" variant="ghost" onClick={() => copy(`${gig.category.category} > ${gig.category.subcategory} > ${gig.category.service_type}`)}><Copy className="w-4 h-4" /></Button>
+          </div>
+          <div className="grid sm:grid-cols-3 gap-3 text-sm">
+            <div><div className="text-[10px] uppercase font-mono text-muted-foreground">Category</div><div className="font-semibold">{gig.category.category}</div></div>
+            <div><div className="text-[10px] uppercase font-mono text-muted-foreground">Sub-category</div><div className="font-semibold">{gig.category.subcategory}</div></div>
+            <div><div className="text-[10px] uppercase font-mono text-muted-foreground">Service type</div><div className="font-semibold">{gig.category.service_type}</div></div>
+          </div>
+          {gig.category.why && <div className="text-xs text-muted-foreground mt-3 border-l-2 border-primary/40 pl-3">{gig.category.why}</div>}
+        </div>
+      )}
+      {Array.isArray(gig.gig_metadata) && gig.gig_metadata.length > 0 && (
+        <div className="surface-card rounded-lg p-5">
+          <h3 className="font-semibold text-sm uppercase tracking-wider font-mono text-muted-foreground mb-3">Gig Metadata (top-seller picks)</h3>
+          <div className="space-y-3">
+            {gig.gig_metadata.map((m: any, i: number) => (
+              <div key={i} className="border-l-2 border-secondary/40 pl-3">
+                <div className="font-medium text-sm">{m.field}</div>
+                <div className="flex flex-wrap gap-1 mt-1">
+                  {(m.recommended_values || []).map((v: string, j: number) => <Badge key={j} className="bg-secondary/10 text-secondary border-secondary/30 text-[11px]">{v}</Badge>)}
+                </div>
+                {m.why && <div className="text-xs text-muted-foreground mt-1">{m.why}</div>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       {f("Gig Title (≤80 chars)", "gig_title")}
       <div className="surface-card rounded-lg p-5">
         <div className="flex items-center justify-between mb-3">
