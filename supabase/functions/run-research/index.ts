@@ -425,8 +425,9 @@ async function runResearchWork(admin: any, userId: string, projectId: string, pr
 }
 
 For "top_sellers": pick the 5 BEST performers, prioritizing: Fiverr's Choice → Top Rated → Pro → highest active orders/queue → highest review counts. Use REAL names, titles, AND copy the gig_url + seller_url EXACTLY from the matching entry in the input data — never invent URLs.
-For "opportunity_score": be brutally honest. Saturated low-demand = 20-40. Saturated high-demand = 50-65. Healthy demand with differentiation room = 70-90.`,
-      "You are an expert Fiverr SEO analyst. Output only valid JSON, no prose. Be specific and reference real data. When the input contains gig_url/seller_url, copy them verbatim into top_sellers — do not invent or guess URLs.",
+For "opportunity_score": be brutally honest. Saturated low-demand = 20-40. Saturated high-demand = 50-65. Healthy demand with differentiation room = 70-90.
+For "niche_angles": return EXACTLY 3 distinct angles. Each must be a REFINEMENT/COMBINATION of the broad niche the user submitted, NOT a generic restatement. Pick angles that have proven demand in the scraped data (visible orders/reviews/queues) BUT are not dominated by Top Rated / Pro / Fiverr's Choice — i.e. realistic for a brand-new seller to break into. Avoid suggesting the most saturated head terms even if they have demand. Use the variation seed so this run produces different angles than previous runs would.`,
+      "You are an expert Fiverr SEO analyst. Output only valid JSON, no prose. Be specific and reference real data. When the input contains gig_url/seller_url, copy them verbatim into top_sellers — do not invent or guess URLs. Each Re-run must use the variation seed to surface DIFFERENT niche_angles than prior runs.",
     );
     const insights = extractJson(insightsText);
 
