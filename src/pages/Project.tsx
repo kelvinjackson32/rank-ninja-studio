@@ -481,7 +481,7 @@ const ProfileStrengthCard = ({ strength }: any) => {
   );
 };
 
-const TitleVariationsView = ({ gig, copy }: any) => {
+const TitleVariationsView = ({ gig, copy, onBuild, building }: any) => {
   const variations = gig?.title_variations || [];
   if (variations.length === 0) return <div className="surface-card rounded-lg p-8 text-center text-muted-foreground">No title variations yet. Re-run research to generate them.</div>;
   return (
@@ -491,11 +491,12 @@ const TitleVariationsView = ({ gig, copy }: any) => {
           <Type className="w-4 h-4 text-primary" />
           <h3 className="font-semibold text-sm uppercase tracking-wider font-mono text-primary">{variations.length} competitive title angles</h3>
         </div>
-        <p className="text-sm text-muted-foreground">Each one models a real winning pattern from your scraped top sellers. Pick the angle that fits your style.</p>
+        <p className="text-sm text-muted-foreground">Each one models a real winning pattern from your scraped top sellers. Click <b>Build this gig</b> to spin up a brand-new gig + profile package built around that exact title.</p>
       </div>
       {variations.map((v: any, i: number) => {
         const len = (v.title || "").length;
         const over = len > 80;
+        const isBuilding = building === v.title;
         return (
           <div key={i} className="surface-card rounded-lg p-5">
             <div className="flex items-start justify-between gap-3 mb-2">
@@ -509,7 +510,13 @@ const TitleVariationsView = ({ gig, copy }: any) => {
               <Button size="icon" variant="ghost" onClick={() => copy(v.title)}><Copy className="w-4 h-4" /></Button>
             </div>
             {v.why_it_works && <div className="text-sm text-muted-foreground mt-2 border-l-2 border-primary/40 pl-3">{v.why_it_works}</div>}
-            <div className={`text-xs font-mono mt-2 ${over ? "text-destructive" : "text-muted-foreground"}`}>{len}/80 chars{over ? " — exceeds Fiverr limit" : ""}</div>
+            <div className="flex items-center justify-between gap-3 mt-3 flex-wrap">
+              <div className={`text-xs font-mono ${over ? "text-destructive" : "text-muted-foreground"}`}>{len}/80 chars{over ? " — exceeds Fiverr limit" : ""}</div>
+              <Button size="sm" className="bg-gradient-to-r from-primary to-secondary text-primary-foreground" disabled={isBuilding} onClick={() => onBuild(v.title)}>
+                {isBuilding ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Rocket className="w-3 h-3 mr-1" />}
+                Build this gig
+              </Button>
+            </div>
           </div>
         );
       })}
