@@ -379,8 +379,11 @@ async function runResearchWork(admin: any, userId: string, projectId: string, pr
 
     await appendLog(admin, projectId, `🤖 AI analyzing winning patterns across pages 1-3...`);
 
+    // Variation seed so each Re-run produces fresh niche angles + edited titles/sellers/etc.
+    const variationSeed = Math.floor(Math.random() * 1_000_000);
+
     const insightsText = await callAI(
-      `Analyze these REAL Fiverr gigs (pages 1-3) scraped for niche "${project.niche}":\n${dataBlob}\n\nReturn JSON with these EXACT keys (no extras):
+      `Analyze these REAL Fiverr gigs (pages 1-3) scraped for niche "${project.niche}":\n${dataBlob}\n\nVariation seed (use to ensure this run produces DIFFERENT niche_angles than any previous run): ${variationSeed}\n\nReturn JSON with these EXACT keys (no extras):
 {
   "competition_level": "low|medium|high|saturated",
   "competition_summary": "2-3 sentences on the market state",
@@ -388,6 +391,16 @@ async function runResearchWork(admin: any, userId: string, projectId: string, pr
   "opportunity_reasoning": "2-3 sentences explaining the opportunity_score honestly",
   "average_starting_price": "$X",
   "average_top_orders": "approximate average orders/queue across the strongest gigs, e.g. '180+ active orders' or 'unknown'",
+  "niche_angles": [
+    {
+      "title": "specific service angle the user could offer (NOT a gig title — a focused sub-niche / service positioning, max 70 chars). Must be a COMBINATION/refinement of the broad niche '${project.niche}' that has VALIDATED demand on Fiverr but LOWER competition than the saturated head term. Examples of good angles: 'Faceless YouTube shorts for finance creators', 'Minimalist logo for SaaS startups', 'AI UGC ads for skincare brands'. Bad: just repeating '${project.niche}'.",
+      "demand_signal": "1 sentence citing what in the scraped data proves buyers want this (orders in queue, repeat patterns, gig count vs review velocity)",
+      "competition_signal": "1 sentence on why this angle is LESS saturated than the head term (fewer Top Rated holding it, gap in tag coverage, etc.)",
+      "why_pick_this": "1 sentence: how a NEW seller can realistically rank and convert here",
+      "estimated_competition": "low|medium",
+      "primary_keyword": "the exact keyword phrase to target"
+    }
+  ],
   "top_keywords": ["10-15 high-ranking keywords pulled from real titles/tags"],
   "keyword_expansion": ["10-15 long-tail and secondary keyword variations a NEW seller should target — different from top_keywords, lower-competition angles, buyer-intent phrases"],
   "winning_patterns": ["5-8 patterns the best gigs share"],
