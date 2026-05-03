@@ -65,6 +65,21 @@ const Project = () => {
     } catch (e: any) { toast.error(e.message); } finally { setRerunning(false); }
   };
 
+  const buildFromAngle = async (angleTitle: string, primaryKeyword?: string) => {
+    if (!user || !angleTitle) return;
+    setBuilding(angleTitle);
+    try {
+      const sec = primaryKeyword && primaryKeyword !== angleTitle ? [primaryKeyword] : [];
+      const { data: created, error } = await supabase.from("projects").insert({
+        user_id: user.id, niche: angleTitle, secondary_keywords: sec, status: "pending",
+      }).select().single();
+      if (error) throw error;
+      supabase.functions.invoke("run-research", { body: { projectId: created.id } }).catch(console.error);
+      toast.success("New gig research launched");
+      nav(`/app/projects/${created.id}`);
+    } catch (e: any) { toast.error(e.message); } finally { setBuilding(null); }
+  };
+
   const markdown = useMemo(() => result ? buildMarkdown(project, result) : "", [project, result]);
 
   const exportMd = () => {
