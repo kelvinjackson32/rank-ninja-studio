@@ -197,7 +197,7 @@ const Project = () => {
   );
 };
 
-const NicheAnglesView = ({ insights, copy }: any) => {
+const NicheAnglesView = ({ insights, copy, onBuild, building }: any) => {
   const angles = insights?.niche_angles || [];
   if (angles.length === 0) return null;
   return (
@@ -206,7 +206,7 @@ const NicheAnglesView = ({ insights, copy }: any) => {
         <Sparkles className="w-4 h-4 text-primary" />
         <h3 className="font-semibold text-sm uppercase tracking-wider font-mono text-primary">Pick your winning angle</h3>
       </div>
-      <p className="text-sm text-muted-foreground mb-4">3 refined sub-niches with proven demand but lower competition than the head term. Hit <b>Re-run</b> to get fresh angles.</p>
+      <p className="text-sm text-muted-foreground mb-4">3 refined sub-niches with proven demand but lower competition than the head term. Click <b>Build this gig</b> to generate a full profile + gig package on the chosen angle.</p>
       <div className="grid md:grid-cols-3 gap-3">
         {angles.slice(0, 3).map((a: any, i: number) => (
           <div key={i} className="rounded-lg border border-border bg-background/40 p-4 flex flex-col gap-2">
@@ -223,9 +223,15 @@ const NicheAnglesView = ({ insights, copy }: any) => {
             {a.demand_signal && <div className="text-xs text-foreground/80"><span className="text-success">Demand:</span> {a.demand_signal}</div>}
             {a.competition_signal && <div className="text-xs text-foreground/80"><span className="text-primary">Gap:</span> {a.competition_signal}</div>}
             {a.why_pick_this && <div className="text-xs text-muted-foreground border-l-2 border-primary/40 pl-2 mt-1">{a.why_pick_this}</div>}
-            <Button size="sm" variant="outline" className="mt-2 h-8" onClick={() => copy(`${a.title}\nKeyword: ${a.primary_keyword || ""}`)}>
-              <Copy className="w-3 h-3 mr-1" />Copy angle
-            </Button>
+            <div className="flex gap-2 mt-2">
+              <Button size="sm" className="flex-1 h-8 bg-gradient-to-r from-primary to-secondary text-primary-foreground" disabled={building === a.title} onClick={() => onBuild(a.title, a.primary_keyword)}>
+                {building === a.title ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Rocket className="w-3 h-3 mr-1" />}
+                Build this gig
+              </Button>
+              <Button size="sm" variant="outline" className="h-8" onClick={() => copy(`${a.title}\nKeyword: ${a.primary_keyword || ""}`)}>
+                <Copy className="w-3 h-3" />
+              </Button>
+            </div>
           </div>
         ))}
       </div>
