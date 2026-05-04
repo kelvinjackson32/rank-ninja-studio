@@ -16,13 +16,14 @@ async function firecrawlScrape(url: string): Promise<{ markdown: string; metadat
         url,
         formats: ["markdown"],
         onlyMainContent: true,
-        waitFor: 3000,
+        waitFor: 3500,
         location: { country: "US", languages: ["en"] },
       }),
     });
     if (!resp.ok) {
       const text = await resp.text();
-      throw new Error(`Firecrawl ${resp.status}: ${text.slice(0, 200)}`);
+      console.error(`Firecrawl ${resp.status}:`, text.slice(0, 300));
+      return null;
     }
     const data = await resp.json();
     const md = data.data?.markdown || data.markdown || "";
@@ -51,6 +52,53 @@ async function callAI(prompt: string, system: string): Promise<string> {
   return data.choices?.[0]?.message?.content || "";
 }
 
+function safeParseJSON(raw: string): any {
+  const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
+  try { return JSON.parse(cleaned); } catch {
+    const m = cleaned.match(/\{[\s\S]*\}/);
+    return m ? JSON.parse(m[0]) : null;
+  }
+}
+
+const AUDIT_SHAPE = `{
+  "overall_score": <0-100>,
+  "verdict": "<one-sentence diagnosis>",
+  "strengths": ["..."],
+  "critical_issues": [
+    { "area": "Title|Tags|Description|Pricing|Images|Profile Bio|Skills|Packages|SEO|Trust", "severity": "high|medium|low", "problem": "...", "why_it_hurts": "...", "fix": "..." }
+  ],
+  "rewrites": {
+    "title": { "current": "...", "improved": "...", "reason": "..." },
+    "tags": { "current": ["..."], "improved": ["..."], "reason": "..." },
+    "description": { "improved": "...", "reason": "..." },
+    "profile_bio": { "improved": "...", "reason": "..." },
+    "packages": { "improved": [{ "name": "Basic|Standard|Premium", "price": 0, "delivery_days": 0, "revisions": 0, "includes": ["..."] }], "reason": "..." },
+    "search_tags": { "improved": ["..."], "reason": "..." }
+  },
+  "action_plan": [{ "step": 1, "action": "...", "expected_impact": "...", "time_to_apply": "5 min" }],
+  "image_prompts": [{ "slot": "Thumbnail 1|2|3", "prompt": "1280x769 detailed prompt..." }]
+}`;
+
+async function auditOne(opts: {
+  niche?: string; issue?: string;
+  profile?: { url: string; markdown: string };
+  gig?: { url: string; markdown: string };
+}) {
+  const system = `You are a Fiverr ranking expert. Audit a seller's content against top-performing sellers. Output ONLY valid JSON. No markdown fences.`;
+  const prompt = `Audit this Fiverr ${opts.gig ? "GIG" : "PROFILE"}. Return STRICT JSON with this exact shape:
+${AUDIT_SHAPE}
+
+Niche: ${opts.niche || "infer"}
+User-reported problem: ${opts.issue || "low impressions, low clicks, no orders"}
+
+${opts.profile ? `=== PROFILE (${opts.profile.url}) ===\n${opts.profile.markdown}\n` : ""}
+${opts.gig ? `=== GIG (${opts.gig.url}) ===\n${opts.gig.markdown}\n` : ""}
+
+Be brutally honest. Compare against top sellers. Identify EXACTLY what's weak. Provide concrete copy-paste rewrites. Description 1000-1150 chars with 5-section skeleton (About / What You Get / Why Choose Me / What I Need From You / CTA). Profile bio 600-1000 chars.`;
+  const raw = await callAI(prompt, system);
+  return safeParseJSON(raw);
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -64,72 +112,65 @@ Deno.serve(async (req) => {
 
     const body = await req.json();
     const profileUrl: string | undefined = body.profileUrl?.trim();
-    const gigUrl: string | undefined = body.gigUrl?.trim();
     const niche: string | undefined = body.niche?.trim();
-    const issue: string | undefined = body.issue?.trim(); // e.g. "low impressions, no orders"
+    const issue: string | undefined = body.issue?.trim();
+    const gigUrls: string[] = Array.isArray(body.gigUrls)
+      ? body.gigUrls.map((u: string) => u?.trim()).filter(Boolean)
+      : (body.gigUrl?.trim() ? [body.gigUrl.trim()] : []);
 
-    if (!profileUrl && !gigUrl) {
-      return new Response(JSON.stringify({ error: "Provide profileUrl and/or gigUrl" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    if (!profileUrl && gigUrls.length === 0) {
+      return new Response(JSON.stringify({ error: "Provide profileUrl and/or gigUrls" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    const scraped: any = {};
-    if (profileUrl) {
-      const r = await firecrawlScrape(profileUrl);
-      if (!r) throw new Error("Failed to scrape profile URL");
-      scraped.profile = r;
-    }
-    if (gigUrl) {
-      const r = await firecrawlScrape(gigUrl);
-      if (!r) throw new Error("Failed to scrape gig URL");
-      scraped.gig = r;
-    }
+    // Scrape profile + all gigs in parallel
+    const profilePromise = profileUrl ? firecrawlScrape(profileUrl) : Promise.resolve(null);
+    const gigPromises = gigUrls.map((u) => firecrawlScrape(u).then((r) => ({ url: u, r })));
+    const [profileScrape, gigScrapes] = await Promise.all([profilePromise, Promise.all(gigPromises)]);
 
-    const system = `You are a Fiverr ranking expert. Audit a seller's profile/gig against top-performing sellers in the same niche. Output ONLY valid JSON. No markdown fences. No commentary.`;
-
-    const prompt = `Audit this Fiverr account. Return STRICT JSON with this exact shape:
-{
-  "overall_score": <0-100>,
-  "verdict": "<one-sentence diagnosis of why the account is underperforming>",
-  "strengths": ["..."],
-  "critical_issues": [
-    { "area": "Title|Tags|Description|Pricing|Images|Profile Bio|Skills|Packages|SEO|Trust", "severity": "high|medium|low", "problem": "...", "why_it_hurts": "...", "fix": "..." }
-  ],
-  "rewrites": {
-    "title": { "current": "...", "improved": "...", "reason": "..." },
-    "tags": { "current": ["..."], "improved": ["..."], "reason": "..." },
-    "description": { "improved": "...", "reason": "..." },
-    "profile_bio": { "improved": "...", "reason": "..." },
-    "packages": { "improved": [{ "name": "Basic|Standard|Premium", "price": 0, "delivery_days": 0, "revisions": 0, "includes": ["..."] }], "reason": "..." },
-    "search_tags": { "improved": ["..."], "reason": "..." }
-  },
-  "action_plan": [
-    { "step": 1, "action": "...", "expected_impact": "...", "time_to_apply": "5 min|1 hour|..." }
-  ],
-  "image_prompts": [
-    { "slot": "Thumbnail 1|2|3", "prompt": "1280x769 detailed prompt for Fiverr gig image..." }
-  ]
-}
-
-Niche/service: ${niche || "infer from scraped content"}
-User-reported problem: ${issue || "low impressions, low clicks, no orders"}
-
-${scraped.profile ? `=== SCRAPED PROFILE PAGE (${profileUrl}) ===\n${scraped.profile.markdown}\n` : ""}
-${scraped.gig ? `=== SCRAPED GIG PAGE (${gigUrl}) ===\n${scraped.gig.markdown}\n` : ""}
-
-Be brutally honest. Compare against top-ranking Fiverr sellers. Identify EXACTLY what's missing or weak. Provide concrete, copy-paste-ready rewrites. Descriptions must be 1000-1150 chars with the standard 5-section skeleton (About this gig / What You Get / Why Choose Me? / What I Need From You / CTA). Profile bio 600-1000 chars, warm and authoritative.`;
-
-    const raw = await callAI(prompt, system);
-    let cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
-    let audit: any;
-    try { audit = JSON.parse(cleaned); }
-    catch {
-      const m = cleaned.match(/\{[\s\S]*\}/);
-      audit = m ? JSON.parse(m[0]) : { error: "AI returned non-JSON", raw: cleaned };
+    if (profileUrl && !profileScrape) throw new Error("Failed to scrape profile URL — check URL or Firecrawl credits");
+    const failedGigs = gigScrapes.filter((g) => !g.r).map((g) => g.url);
+    if (failedGigs.length === gigUrls.length && gigUrls.length > 0) {
+      throw new Error(`Failed to scrape gig URLs: ${failedGigs.join(", ")}`);
     }
 
-    return new Response(JSON.stringify({ success: true, audit, scraped: { profileUrl, gigUrl } }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    // Audit profile (if provided) and each successful gig in parallel
+    const profileAuditPromise = profileScrape
+      ? auditOne({ niche, issue, profile: { url: profileUrl!, markdown: profileScrape.markdown } })
+      : Promise.resolve(null);
+
+    const gigAuditPromises = gigScrapes
+      .filter((g) => g.r)
+      .map(async (g) => ({
+        url: g.url,
+        title: g.r!.metadata?.title || g.url,
+        audit: await auditOne({ niche, issue, gig: { url: g.url, markdown: g.r!.markdown } }),
+      }));
+
+    const [profileAudit, gigAudits] = await Promise.all([profileAuditPromise, Promise.all(gigAuditPromises)]);
+
+    // Rank gigs: lower score + more high-severity issues = higher priority
+    const ranked = gigAudits
+      .map((g) => {
+        const issues = g.audit?.critical_issues || [];
+        const high = issues.filter((i: any) => i.severity === "high").length;
+        const med = issues.filter((i: any) => i.severity === "medium").length;
+        const low = issues.filter((i: any) => i.severity === "low").length;
+        const score = g.audit?.overall_score ?? 50;
+        // priority score: lower health + more severe issues + bigger fix impact
+        const priority = (100 - score) + high * 15 + med * 6 + low * 2;
+        return { ...g, priority, high, med, low, score };
+      })
+      .sort((a, b) => b.priority - a.priority)
+      .map((g, i) => ({ ...g, rank: i + 1 }));
+
+    return new Response(JSON.stringify({
+      success: true,
+      profileAudit,
+      gigAudits: ranked,
+      failedGigs,
+      // legacy single-audit shape for backwards compat
+      audit: profileAudit || ranked[0]?.audit || null,
+    }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (e: any) {
     console.error("audit error", e);
     return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
