@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { Activity, Key, FolderKanban, LogOut, Radar, Menu, X } from "lucide-react";
+import { Activity, Key, FolderKanban, LogOut, Radar, Menu, X, Stethoscope } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 const items = [
   { to: "/app", label: "Dashboard", icon: Activity },
   { to: "/app/projects", label: "Projects", icon: FolderKanban },
+  { to: "/app/audit", label: "Audit Account", icon: Stethoscope },
   { to: "/app/settings", label: "API Keys", icon: Key },
 ];
 

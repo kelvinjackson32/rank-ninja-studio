@@ -13,6 +13,7 @@ import NewProject from "./pages/NewProject";
 import Project from "./pages/Project";
 import Projects from "./pages/Projects";
 import Compare from "./pages/Compare";
+import Audit from "./pages/Audit";
 import NotFound from "./pages/NotFound.tsx";
 
 const queryClient = new QueryClient();
@@ -32,6 +33,7 @@ const App = () => (
             <Route path="/app/projects" element={<Protected><Projects /></Protected>} />
             <Route path="/app/projects/:id" element={<Protected><Project /></Protected>} />
             <Route path="/app/compare/:groupId" element={<Protected><Compare /></Protected>} />
+            <Route path="/app/audit" element={<Protected><Audit /></Protected>} />
             <Route path="/app/settings" element={<Protected><Settings /></Protected>} />
             <Route path="*" element={<NotFound />} />
           </Routes>
