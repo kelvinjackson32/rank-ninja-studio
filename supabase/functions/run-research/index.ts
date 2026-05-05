@@ -38,7 +38,7 @@ async function appendLog(supabase: any, projectId: string, msg: string) {
   log.push({ ts: new Date().toISOString(), msg });
   await supabase
     .from("projects")
-    .update({ progress_log: log })
+    .update({ progress_log: log, updated_at: new Date().toISOString() })
     .eq("id", projectId);
 }
 
@@ -222,7 +222,7 @@ Deno.serve(async (req) => {
 
     await admin
       .from("projects")
-      .update({ status: "scraping", progress_log: [] })
+      .update({ status: "scraping", progress_log: [], updated_at: new Date().toISOString() })
       .eq("id", projectId);
     await appendLog(
       admin,
@@ -238,7 +238,7 @@ Deno.serve(async (req) => {
       } catch (e: any) {
         console.error("background run-research error:", e);
         try {
-          await admin.from("projects").update({ status: "error" }).eq("id", projectId);
+          await admin.from("projects").update({ status: "error", updated_at: new Date().toISOString() }).eq("id", projectId);
           await appendLog(admin, projectId, `❌ ${e.message}`);
         } catch {}
       }
