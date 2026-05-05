@@ -35,12 +35,6 @@ const NewProject = () => {
   const launch = async () => {
     setLoading(true);
     try {
-      const { data: keys } = await supabase.from("api_keys").select("id").limit(1);
-      if (!keys || keys.length === 0) {
-        toast.error("Add an Apify API key first in Settings");
-        nav("/app/settings"); return;
-      }
-
       if (bulk) {
         const niches = bulkNiches.map(n => n.trim()).filter(Boolean).slice(0, MAX_BULK);
         if (niches.length < 2) { toast.error("Enter at least 2 niches for bulk mode"); return; }
