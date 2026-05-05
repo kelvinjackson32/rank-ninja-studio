@@ -149,7 +149,7 @@ const Audit = () => {
       toast({ title: "Add a Fiverr URL", description: "Paste your profile URL and/or one or more gig URLs.", variant: "destructive" });
       return;
     }
-    setLoading(true); setProfileAudit(null); setRanked([]); setFailedGigs([]);
+    setLoading(true); setProfileAudit(null); setRanked([]); setFailedGigs([]); setBlockedNote(null);
     try {
       const { data, error } = await supabase.functions.invoke("audit-account", {
         body: { profileUrl, gigUrls: cleanGigs, niche, issue },
@@ -159,6 +159,7 @@ const Audit = () => {
       setProfileAudit(data.profileAudit || null);
       setRanked(data.gigAudits || []);
       setFailedGigs(data.failedGigs || []);
+      setBlockedNote(data.blockedNote || null);
       toast({ title: "Audit complete", description: `${(data.gigAudits || []).length} gig${(data.gigAudits || []).length === 1 ? "" : "s"} ranked by priority.` });
     } catch (e: any) {
       toast({ title: "Audit failed", description: e.message, variant: "destructive" });
