@@ -21,6 +21,17 @@ const NewProject = () => {
   const [bulkNiches, setBulkNiches] = useState<string[]>(["", ""]);
   const [loading, setLoading] = useState(false);
 
+  const launchResearch = async (projectId: string) => {
+    const { error } = await supabase.functions.invoke("run-research", { body: { projectId } });
+    if (error) {
+      await supabase.from("projects").update({
+        status: "error",
+        progress_log: [{ ts: new Date().toISOString(), msg: `❌ Research failed to start: ${error.message}` }],
+      }).eq("id", projectId);
+      throw error;
+    }
+  };
+
   const launch = async () => {
     setLoading(true);
     try {
@@ -37,11 +48,10 @@ const NewProject = () => {
         const inserts = niches.map(n => ({ user_id: user!.id, niche: n, secondary_keywords: [], status: "pending", bulk_group_id: groupId }));
         const { data: created, error } = await supabase.from("projects").insert(inserts).select();
         if (error) throw error;
-        // fire each research in parallel
-        (created || []).forEach((p: any) => {
-          supabase.functions.invoke("run-research", { body: { projectId: p.id } }).catch(console.error);
-        });
-        toast.success(`Launched ${niches.length} niches in parallel`);
+        const launched = await Promise.allSettled((created || []).map((p: any) => launchResearch(p.id)));
+        const failed = launched.filter((r) => r.status === "rejected").length;
+        if (failed) toast.error(`${failed} research job${failed > 1 ? "s" : ""} failed to start`);
+        else toast.success(`Launched ${niches.length} niches in parallel`);
         nav(`/app/compare/${groupId}`);
         return;
       }
@@ -52,7 +62,7 @@ const NewProject = () => {
         user_id: user!.id, niche: niche.trim(), secondary_keywords: sec, status: "pending",
       }).select().single();
       if (error) throw error;
-      supabase.functions.invoke("run-research", { body: { projectId: project.id } }).catch(console.error);
+      await launchResearch(project.id);
       toast.success("Research launched!");
       nav(`/app/projects/${project.id}`);
     } catch (e: any) {
