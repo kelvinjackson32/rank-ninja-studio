@@ -7,6 +7,26 @@ const corsHeaders = {
 };
 
 const APIFY_BASE = "https://api.apify.com/v2";
+const APIFY_SYNC_TIMEOUT_SECONDS = 55;
+const FETCH_TIMEOUT_MS = 65_000;
+const AI_TIMEOUT_MS = 70_000;
+const MAX_KEYS_PER_QUERY = 2;
+const MAX_SECONDARY_KEYWORDS = 1;
+
+async function fetchWithTimeout(url: string, init: RequestInit = {}, timeoutMs = FETCH_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (e: any) {
+    if (e?.name === "AbortError") {
+      throw new Error(`Request timed out after ${Math.round(timeoutMs / 1000)}s`);
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 async function appendLog(supabase: any, projectId: string, msg: string) {
   const { data: project } = await supabase
@@ -18,7 +38,7 @@ async function appendLog(supabase: any, projectId: string, msg: string) {
   log.push({ ts: new Date().toISOString(), msg });
   await supabase
     .from("projects")
-    .update({ progress_log: log })
+    .update({ progress_log: log, updated_at: new Date().toISOString() })
     .eq("id", projectId);
 }
 
@@ -29,12 +49,12 @@ async function runApifyActor(
 ): Promise<any[]> {
   // Apify actor IDs may contain '/' which must be encoded as '~'
   const safeActorId = actorId.replace(/\//g, "~");
-  const url = `${APIFY_BASE}/acts/${safeActorId}/run-sync-get-dataset-items?token=${apiKey}&timeout=120`;
-  const resp = await fetch(url, {
+  const url = `${APIFY_BASE}/acts/${safeActorId}/run-sync-get-dataset-items?token=${apiKey}&timeout=${APIFY_SYNC_TIMEOUT_SECONDS}`;
+  const resp = await fetchWithTimeout(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
-  });
+  }, (APIFY_SYNC_TIMEOUT_SECONDS + 10) * 1000);
   if (!resp.ok) {
     const text = await resp.text();
     const runId = text.match(/run ID:\s*([A-Za-z0-9_-]+)/)?.[1];
@@ -45,12 +65,13 @@ async function runApifyActor(
     err.status = resp.status;
     throw err;
   }
-  return await resp.json();
+  const data = await resp.json();
+  return Array.isArray(data) ? data : (data?.items || data?.data || []);
 }
 
 async function getApifyRunLog(apiKey: string, runId: string): Promise<string> {
   try {
-    const resp = await fetch(`${APIFY_BASE}/logs/${runId}?token=${apiKey}`);
+    const resp = await fetchWithTimeout(`${APIFY_BASE}/logs/${runId}?token=${apiKey}`, {}, 8_000);
     if (!resp.ok) return "";
     const text = await resp.text();
     return text.split("\n").filter(Boolean).slice(-8).join("\n").slice(0, 900);
@@ -64,19 +85,19 @@ async function scrapeWithFirecrawl(query: string): Promise<any[]> {
   const key = Deno.env.get("FIRECRAWL_API_KEY");
   if (!key) throw new Error("FIRECRAWL_API_KEY missing");
   const items: any[] = [];
-  for (const page of [1, 2, 3]) {
+  for (const page of [1, 2]) {
     const url = `https://www.fiverr.com/search/gigs?query=${encodeURIComponent(query)}&page=${page}`;
-    const resp = await fetch("https://api.firecrawl.dev/v2/scrape", {
+    const resp = await fetchWithTimeout("https://api.firecrawl.dev/v2/scrape", {
       method: "POST",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         url,
         formats: ["markdown", "links"],
         onlyMainContent: true,
-        waitFor: 2500,
+        waitFor: 1200,
         location: { country: "US", languages: ["en"] },
       }),
-    });
+    }, 35_000);
     if (!resp.ok) {
       const t = await resp.text();
       throw new Error(`Firecrawl ${resp.status}: ${t.slice(0, 200)}`);
@@ -122,7 +143,7 @@ async function scrapeWithFirecrawl(query: string): Promise<any[]> {
 async function callAI(prompt: string, system: string): Promise<string> {
   const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
   if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY missing");
-  const resp = await fetch(
+  const resp = await fetchWithTimeout(
     "https://ai.gateway.lovable.dev/v1/chat/completions",
     {
       method: "POST",
@@ -138,6 +159,7 @@ async function callAI(prompt: string, system: string): Promise<string> {
         ],
       }),
     },
+    AI_TIMEOUT_MS,
   );
   if (resp.status === 429)
     throw new Error("AI rate limit. Try again in a moment.");
@@ -200,7 +222,7 @@ Deno.serve(async (req) => {
 
     await admin
       .from("projects")
-      .update({ status: "scraping", progress_log: [] })
+      .update({ status: "scraping", progress_log: [], updated_at: new Date().toISOString() })
       .eq("id", projectId);
     await appendLog(
       admin,
@@ -216,7 +238,7 @@ Deno.serve(async (req) => {
       } catch (e: any) {
         console.error("background run-research error:", e);
         try {
-          await admin.from("projects").update({ status: "error" }).eq("id", projectId);
+          await admin.from("projects").update({ status: "error", updated_at: new Date().toISOString() }).eq("id", projectId);
           await appendLog(admin, projectId, `❌ ${e.message}`);
         } catch {}
       }
@@ -248,20 +270,20 @@ async function runResearchWork(admin: any, userId: string, projectId: string, pr
       .eq("user_id", userId)
       .order("status")
       .order("last_used_at", { ascending: true, nullsFirst: true });
-    if (!keys || keys.length === 0)
-      throw new Error("No Apify API keys configured. Add one in Settings.");
+    if ((!keys || keys.length === 0) && !Deno.env.get("FIRECRAWL_API_KEY"))
+      throw new Error("No scraper is configured. Add an Apify API key in Settings and try again.");
 
     const queries = [
       project.niche,
       ...(project.secondary_keywords || []),
-    ].filter(Boolean);
+    ].filter(Boolean).slice(0, 1 + MAX_SECONDARY_KEYWORDS);
     const allItems: any[] = [];
 
     for (const q of queries) {
       await appendLog(admin, projectId, `🌐 Scraping Fiverr for: "${q}"`);
       let success = false;
-      let lastError = "";
-      for (const key of keys) {
+      let lastError = keys?.length ? "" : "No Apify key saved; using backup scraper";
+      for (const key of (keys || []).filter((k: any) => k.status !== "rate_limited").slice(0, MAX_KEYS_PER_QUERY)) {
         if (key.status === "rate_limited") continue;
         const actorId = key.actor_id || "piotrv1001/fiverr-listings-scraper";
         try {
@@ -270,19 +292,19 @@ async function runResearchWork(admin: any, userId: string, projectId: string, pr
             projectId,
             `   → Using key "${key.name}" (actor: ${actorId})`,
           );
-          // Scrape pages 1, 2, 3 explicitly
-          const pageUrls = [1, 2, 3].map((page) =>
+          // Scrape the first 2 pages for speed/reliability, then let AI extrapolate patterns.
+          const pageUrls = [1, 2].map((page) =>
             `https://www.fiverr.com/search/gigs?query=${encodeURIComponent(q)}&page=${page}`,
           );
           const items = await runApifyActor(key.api_key, actorId, {
             // piotrv1001/fiverr-listings-scraper expects `searchUrls` as string URLs.
             searchUrls: pageUrls,
-            maxItemsPerUrl: 48,
+            maxItemsPerUrl: 24,
             // Compatibility with other community actors (epctex, etc.)
             startUrls: pageUrls.map((url) => ({ url })),
             search: q,
-            maxItems: 144,
-            maxPages: 3,
+            maxItems: 48,
+            maxPages: 2,
           });
           await admin
             .from("api_keys")
@@ -292,10 +314,14 @@ async function runResearchWork(admin: any, userId: string, projectId: string, pr
               error_message: null,
             })
             .eq("id", key.id);
-          allItems.push(...items.map((it: any) => ({ ...it, _query: q })));
-          await appendLog(admin, projectId, `   ✓ Got ${items.length} gigs`);
-          success = true;
-          break;
+          if (items.length > 0) {
+            allItems.push(...items.map((it: any) => ({ ...it, _query: q })));
+            await appendLog(admin, projectId, `   ✓ Got ${items.length} gigs`);
+            success = true;
+            break;
+          }
+          lastError = "Scraper returned 0 gigs";
+          await appendLog(admin, projectId, `   ⚠ Key "${key.name}" returned 0 gigs; trying fallback`);
         } catch (e: any) {
           const status = e.status === 429 ? "rate_limited" : "error";
           lastError = e.message || String(e);
@@ -341,7 +367,7 @@ async function runResearchWork(admin: any, userId: string, projectId: string, pr
     );
     await admin
       .from("projects")
-      .update({ status: "analyzing" })
+      .update({ status: "analyzing", updated_at: new Date().toISOString() })
       .eq("id", projectId);
 
     // Compact scraped data for AI — include order/queue signals + source URLs
@@ -351,7 +377,7 @@ async function runResearchWork(admin: any, userId: string, projectId: string, pr
       if (u.startsWith("/")) return `https://www.fiverr.com${u}`;
       return null;
     };
-    const compacted = allItems.slice(0, 90).map((g: any) => {
+    const compacted = allItems.slice(0, 60).map((g: any) => {
       const sellerName = g.seller?.name || g.sellerName || (typeof g.seller === "string" ? g.seller : null) || g.username;
       const gigUrl = normalizeUrl(g.url || g.gigUrl || g.link || g.gigLink || g.permalink);
       const sellerUrl = normalizeUrl(g.seller?.url || g.seller?.profileUrl || g.sellerUrl || g.sellerProfileUrl)
@@ -375,15 +401,15 @@ async function runResearchWork(admin: any, userId: string, projectId: string, pr
       };
     });
 
-    const dataBlob = JSON.stringify(compacted).slice(0, 38000);
+    const dataBlob = JSON.stringify(compacted).slice(0, 26000);
 
-    await appendLog(admin, projectId, `🤖 AI analyzing winning patterns across pages 1-3...`);
+    await appendLog(admin, projectId, `🤖 AI analyzing winning patterns across the strongest first-page data...`);
 
     // Variation seed so each Re-run produces fresh niche angles + edited titles/sellers/etc.
     const variationSeed = Math.floor(Math.random() * 1_000_000);
 
     const insightsText = await callAI(
-      `Analyze these REAL Fiverr gigs (pages 1-3) scraped for niche "${project.niche}":\n${dataBlob}\n\nVariation seed (use to ensure this run produces DIFFERENT niche_angles than any previous run): ${variationSeed}\n\nReturn JSON with these EXACT keys (no extras):
+      `Analyze these REAL Fiverr gigs scraped for niche "${project.niche}":\n${dataBlob}\n\nVariation seed (use to ensure this run produces DIFFERENT niche_angles than any previous run): ${variationSeed}\n\nReturn JSON with these EXACT keys (no extras):
 {
   "competition_level": "low|medium|high|saturated",
   "competition_summary": "2-3 sentences on the market state",
@@ -448,88 +474,66 @@ For "niche_angles": return EXACTLY 3 distinct angles. Each must be a REFINEMENT/
       });
     }
 
-    await appendLog(admin, projectId, `✏️ Generating profile + strength score...`);
-    const profileText = await callAI(
-      `Based on this Fiverr competitor research for "${project.niche}":\nInsights: ${JSON.stringify(insights)}\nTop gigs sample: ${dataBlob.slice(0, 10000)}\n\nGenerate a complete Fiverr PROFILE for a NEW seller (zero reviews) that competes with top performers. Return JSON:
-{
-  "display_name": "...",
-  "profile_title": "headline under name (max 70 chars)",
-  "short_bio": "MAX 150 characters. Punchy, keyword-rich, hook-style. NEVER exceed 150 chars.",
-  "about": "STRUCTURED long bio for the Fiverr 'About me' section, 600-1000 characters total. MUST be plain text with real line breaks (use \\n). Open with a warm 1-line greeting + name (e.g. 'Hi there! I'm <Name>.'). Follow with a 2-3 sentence positioning paragraph: who you help, what you specialize in (use the niche keyword naturally 2-3 times), years/experience or proof, what makes you different. Close with 1 sentence inviting the buyer to message. Conversational, confident, never robotic. NO markdown headers, NO bullet symbols — match the natural paragraph style of top Fiverr 'About me' sections.",
-  "skills": ["max 15 skills"],
-  "work_experience": [{"title":"...","company":"...","years":"..."}],
-  "education": [{"degree":"...","institution":"...","year":"..."}],
-  "certifications": ["..."],
-  "languages": [{"name":"English","level":"Native/Fluent"}],
-  "profile_strength": {
-    "score": 0-100 integer,
-    "breakdown": {
-      "title_keywords": 0-20,
-      "bio_hook": 0-20,
-      "skills_coverage": 0-20,
-      "credibility_signals": 0-20,
-      "niche_fit": 0-20
-    },
-    "tips": ["3-6 specific improvement tips the user can act on"]
-  }
-}
-CRITICAL: short_bio <=150 characters. profile_strength.score = sum of breakdown values.`,
-      "You are an expert Fiverr profile strategist. Output only valid JSON. Make text natural, persuasive, never robotic. Strictly respect character limits.",
-    );
-    const profile_optimization = extractJson(profileText);
-    if (typeof profile_optimization.short_bio === "string" && profile_optimization.short_bio.length > 150) {
-      profile_optimization.short_bio = profile_optimization.short_bio.slice(0, 147).trimEnd() + "...";
-    }
+    await appendLog(admin, projectId, `✏️ Generating profile, gig package, requirements, and thumbnails...`);
+    const offerText = await callAI(
+      `Based on this Fiverr competitor research for "${project.niche}":
+Insights: ${JSON.stringify(insights)}
+Top gigs sample: ${dataBlob.slice(0, 9000)}
 
-    await appendLog(admin, projectId, `🎯 Generating gig + title variations + thumbnail prompts...`);
-    const gigText = await callAI(
-      `Based on the research for "${project.niche}":\nInsights: ${JSON.stringify(insights)}\nReal top gigs: ${dataBlob.slice(0, 12000)}\n\nVariation seed (use to ensure each re-run produces NEW gig_title, title_variations, packages, FAQ wording and thumbnail prompts): ${variationSeed}\n\nGenerate the BEST possible Fiverr gig PLUS 6-8 strong alternative title variations, gig metadata, requirements, and 4 thumbnail prompts. Return JSON:
+Variation seed: ${variationSeed}
+
+Generate the complete Fiverr profile and gig package in ONE valid JSON object with EXACTLY these top-level keys:
 {
-  "gig_title": "max 80 chars, primary keyword at start",
-  "title_variations": [
-    {
-      "title": "max 80 chars, distinct angle",
-      "angle": "what hook this uses (e.g. 'price anchor', 'speed promise', 'authority claim', 'niche specificity')",
-      "why_it_works": "1 sentence tied to real top-seller patterns from the data"
+  "profile_optimization": {
+    "display_name": "...",
+    "profile_title": "keyword-rich headline, max 70 chars",
+    "short_bio": "MAX 150 characters",
+    "about": "Natural Fiverr About me section, 600-950 chars, real \n line breaks, no markdown",
+    "skills": ["max 15 skills"],
+    "work_experience": [{"title":"...","company":"...","years":"..."}],
+    "education": [{"degree":"...","institution":"...","year":"..."}],
+    "certifications": ["..."],
+    "languages": [{"name":"English","level":"Native/Fluent"}],
+    "profile_strength": {
+      "score": 0-100,
+      "breakdown": {"title_keywords":0-20,"bio_hook":0-20,"skills_coverage":0-20,"credibility_signals":0-20,"niche_fit":0-20},
+      "tips": ["3-6 specific tips"]
     }
-  ],
-  "category": {
-    "category": "Top-level Fiverr category most chosen by the scraped top sellers for this niche (e.g. 'Video & Animation', 'Graphics & Design', 'Programming & Tech', 'Writing & Translation', 'Digital Marketing', 'Music & Audio', 'Business', 'AI Services'). Pick the BEST fit for niche '${project.niche}'.",
-    "subcategory": "Exact Fiverr sub-category top sellers in the scraped data use most for this niche.",
-    "service_type": "The 'Service type' Fiverr asks for (e.g. 'AI Video', 'Logo Design', 'WordPress Development'). Match what top sellers in the scraped data picked.",
-    "why": "1 sentence: why this category/sub-category/service_type combo (cite the top-seller pattern observed)."
   },
-  "gig_metadata": [
-    { "field": "field name Fiverr asks (e.g. 'Style', 'Software', 'Voice Gender', 'Platform')", "recommended_values": ["value1","value2"], "why": "1 sentence: which top sellers picked this and why it helps ranking" }
-  ],
-  "search_tags": ["8-10 ranking tags"],
-  "description": "STRUCTURED Fiverr gig description, 1000-1150 characters total. MUST be plain text with real line breaks (\\n) and use this EXACT skeleton, adapted to the niche '${project.niche}':\\n\\nAbout this gig\\n<1 punchy opening line that promises the outcome and uses the primary keyword>\\n\\n<2-3 sentence problem→solution paragraph that mentions the primary keyword once more, naturally>\\n\\nWhat You Get: <one line summarizing tiers/scope>\\n• <deliverable 1 with **bold** key benefit>\\n• <deliverable 2>\\n• <deliverable 3>\\n• <deliverable 4>\\n\\nWhy Choose Me?\\n• **Fast & Professional Communication** — <short reason>\\n• **Unlimited Revisions** until you're 100% happy\\n• **High-Quality Delivery** tailored to your goals\\n• **Niche Expertise** in <niche / sub-niche>\\n• **On-Time Delivery** every single order\\n\\nWhat I Need From You:\\n• <input 1 specific to the niche>\\n• <input 2>\\n• <input 3>\\n\\nCall to Action: Ready to <desired buyer outcome>? **Contact me** now to get started or place your order today!\\n\\nRULES: 1000-1150 chars; primary keyword 3-5 times naturally; no markdown headers (#).",
-  "buyer_requirements": [
-    { "question": "exact question to ask buyer at order start, niche-specific", "type": "free_text|multiple_choice|attachment", "required": true, "options": ["only for multiple_choice"] }
-  ],
-  "faqs": [{"q":"...","a":"..."}],
-  "packages": {
-    "basic":   {"name":"...","price":"$X","delivery_days":N,"revisions":N,"features":["..."]},
-    "standard":{"name":"...","price":"$X","delivery_days":N,"revisions":N,"features":["..."]},
-    "premium": {"name":"...","price":"$X","delivery_days":N,"revisions":N,"features":["..."]}
-  },
-  "thumbnail_prompts": [
-    {
-      "style": "e.g. 'Bold typography + product mockup' — modeled on what top sellers in this niche actually use to win clicks",
-      "prompt": "Detailed image-gen prompt (80-140 words) sized for Fiverr's gig image of EXACTLY 1280x769 pixels. MUST include: subject specific to the niche '${project.niche}', composition for a 1280x769 horizontal canvas with safe margins, color palette inspired by top-converting Fiverr thumbnails in this niche (name the colors), lighting, 3-5 short bold headline words to overlay (high contrast, sans-serif, large), focal point (product/face/example), trust elements (badges, stars, before/after split if relevant). End with: --ar 1280:769 --no watermark, blurry, low-res, lorem-ipsum text, extra fingers --style raw"
-    }
-  ]
+  "gig_optimization": {
+    "gig_title": "max 80 chars, primary keyword at start",
+    "title_variations": [{"title":"max 80 chars","angle":"...","why_it_works":"..."}],
+    "category": {"category":"best Fiverr category","subcategory":"best subcategory","service_type":"best service type","why":"..."},
+    "gig_metadata": [{"field":"Fiverr field name","recommended_values":["value1","value2"],"why":"..."}],
+    "search_tags": ["8-10 ranking tags"],
+    "description": "1000-1150 chars. Use sections: About this gig, What You Get, Why Choose Me?, What I Need From You, Call to Action. Use real \n and bullet • markers.",
+    "buyer_requirements": [{"question":"niche-specific order question","type":"free_text|multiple_choice|attachment","required":true,"options":["only for multiple_choice"]}],
+    "faqs": [{"q":"...","a":"..."}],
+    "packages": {
+      "basic":{"name":"...","price":"$X","delivery_days":2,"revisions":1,"features":["..."]},
+      "standard":{"name":"...","price":"$X","delivery_days":3,"revisions":2,"features":["..."]},
+      "premium":{"name":"...","price":"$X","delivery_days":5,"revisions":3,"features":["..."]}
+    },
+    "thumbnail_prompts": [{"style":"...","prompt":"80-140 word image-gen prompt for 1280x769 Fiverr gig image, with bold headline words, focal point, trust elements, palette, --ar 1280:769 --no watermark, blurry, low-res, lorem-ipsum text --style raw"}]
+  }
 }
 
 REQUIREMENTS:
-- title_variations: EXACTLY 6-8 items, each ≤80 chars, distinct angles modeled on the scraped top sellers.
-- gig_metadata: 4-7 items modeled on the actual fields/values top sellers picked for this niche.
-- buyer_requirements: 4-6 niche-specific items (never generic).
-- faqs: exactly 10 items.
-- thumbnail_prompts: exactly 4 items, varied styles (typography-led, product-mockup, character/face, before-after split). EVERY prompt enforces 1280x769 sizing and reflects winning patterns for THIS niche.`,
-      "You are a Fiverr top-seller copywriter + AI image prompt engineer. Output only valid JSON. The 'description' MUST follow the exact section skeleton with real \\n line breaks and bullet • markers, total 1000-1150 characters. Adapt every line to the user's niche. Title variations and thumbnail prompts must be specific, competitive, and modeled on real top sellers in the scraped data. Each Re-run uses the variation seed to produce DIFFERENT outputs.",
+- profile_optimization.short_bio <=150 chars. profile_strength.score must equal the breakdown sum.
+- title_variations: EXACTLY 6 items, each <=80 chars.
+- gig_metadata: 4-6 niche-specific items.
+- buyer_requirements: 4-6 niche-specific items.
+- faqs: exactly 8 items.
+- thumbnail_prompts: exactly 4 varied styles modeled on high-click Fiverr thumbnails.
+- Everything must be specific to "${project.niche}" and grounded in the insights/top gigs.`,
+      "You are a Fiverr top-seller strategist. Output only valid JSON. Generate premium but concise profile and gig assets that respect all Fiverr character limits.",
     );
-    const gig_optimization = extractJson(gigText);
+    const offer = extractJson(offerText);
+    const profile_optimization = offer.profile_optimization || {};
+    const gig_optimization = offer.gig_optimization || {};
+    if (typeof profile_optimization.short_bio === "string" && profile_optimization.short_bio.length > 150) {
+      profile_optimization.short_bio = profile_optimization.short_bio.slice(0, 147).trimEnd() + "...";
+    }
 
     await admin.from("research_results").insert({
       project_id: projectId,
@@ -542,7 +546,7 @@ REQUIREMENTS:
 
     await admin
       .from("projects")
-      .update({ status: "complete" })
+      .update({ status: "complete", updated_at: new Date().toISOString() })
       .eq("id", projectId);
     await appendLog(
       admin,
