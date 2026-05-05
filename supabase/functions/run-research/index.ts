@@ -474,88 +474,66 @@ For "niche_angles": return EXACTLY 3 distinct angles. Each must be a REFINEMENT/
       });
     }
 
-    await appendLog(admin, projectId, `✏️ Generating profile + strength score...`);
-    const profileText = await callAI(
-      `Based on this Fiverr competitor research for "${project.niche}":\nInsights: ${JSON.stringify(insights)}\nTop gigs sample: ${dataBlob.slice(0, 10000)}\n\nGenerate a complete Fiverr PROFILE for a NEW seller (zero reviews) that competes with top performers. Return JSON:
-{
-  "display_name": "...",
-  "profile_title": "headline under name (max 70 chars)",
-  "short_bio": "MAX 150 characters. Punchy, keyword-rich, hook-style. NEVER exceed 150 chars.",
-  "about": "STRUCTURED long bio for the Fiverr 'About me' section, 600-1000 characters total. MUST be plain text with real line breaks (use \\n). Open with a warm 1-line greeting + name (e.g. 'Hi there! I'm <Name>.'). Follow with a 2-3 sentence positioning paragraph: who you help, what you specialize in (use the niche keyword naturally 2-3 times), years/experience or proof, what makes you different. Close with 1 sentence inviting the buyer to message. Conversational, confident, never robotic. NO markdown headers, NO bullet symbols — match the natural paragraph style of top Fiverr 'About me' sections.",
-  "skills": ["max 15 skills"],
-  "work_experience": [{"title":"...","company":"...","years":"..."}],
-  "education": [{"degree":"...","institution":"...","year":"..."}],
-  "certifications": ["..."],
-  "languages": [{"name":"English","level":"Native/Fluent"}],
-  "profile_strength": {
-    "score": 0-100 integer,
-    "breakdown": {
-      "title_keywords": 0-20,
-      "bio_hook": 0-20,
-      "skills_coverage": 0-20,
-      "credibility_signals": 0-20,
-      "niche_fit": 0-20
-    },
-    "tips": ["3-6 specific improvement tips the user can act on"]
-  }
-}
-CRITICAL: short_bio <=150 characters. profile_strength.score = sum of breakdown values.`,
-      "You are an expert Fiverr profile strategist. Output only valid JSON. Make text natural, persuasive, never robotic. Strictly respect character limits.",
-    );
-    const profile_optimization = extractJson(profileText);
-    if (typeof profile_optimization.short_bio === "string" && profile_optimization.short_bio.length > 150) {
-      profile_optimization.short_bio = profile_optimization.short_bio.slice(0, 147).trimEnd() + "...";
-    }
+    await appendLog(admin, projectId, `✏️ Generating profile, gig package, requirements, and thumbnails...`);
+    const offerText = await callAI(
+      `Based on this Fiverr competitor research for "${project.niche}":
+Insights: ${JSON.stringify(insights)}
+Top gigs sample: ${dataBlob.slice(0, 9000)}
 
-    await appendLog(admin, projectId, `🎯 Generating gig + title variations + thumbnail prompts...`);
-    const gigText = await callAI(
-      `Based on the research for "${project.niche}":\nInsights: ${JSON.stringify(insights)}\nReal top gigs: ${dataBlob.slice(0, 12000)}\n\nVariation seed (use to ensure each re-run produces NEW gig_title, title_variations, packages, FAQ wording and thumbnail prompts): ${variationSeed}\n\nGenerate the BEST possible Fiverr gig PLUS 6-8 strong alternative title variations, gig metadata, requirements, and 4 thumbnail prompts. Return JSON:
+Variation seed: ${variationSeed}
+
+Generate the complete Fiverr profile and gig package in ONE valid JSON object with EXACTLY these top-level keys:
 {
-  "gig_title": "max 80 chars, primary keyword at start",
-  "title_variations": [
-    {
-      "title": "max 80 chars, distinct angle",
-      "angle": "what hook this uses (e.g. 'price anchor', 'speed promise', 'authority claim', 'niche specificity')",
-      "why_it_works": "1 sentence tied to real top-seller patterns from the data"
+  "profile_optimization": {
+    "display_name": "...",
+    "profile_title": "keyword-rich headline, max 70 chars",
+    "short_bio": "MAX 150 characters",
+    "about": "Natural Fiverr About me section, 600-950 chars, real \n line breaks, no markdown",
+    "skills": ["max 15 skills"],
+    "work_experience": [{"title":"...","company":"...","years":"..."}],
+    "education": [{"degree":"...","institution":"...","year":"..."}],
+    "certifications": ["..."],
+    "languages": [{"name":"English","level":"Native/Fluent"}],
+    "profile_strength": {
+      "score": 0-100,
+      "breakdown": {"title_keywords":0-20,"bio_hook":0-20,"skills_coverage":0-20,"credibility_signals":0-20,"niche_fit":0-20},
+      "tips": ["3-6 specific tips"]
     }
-  ],
-  "category": {
-    "category": "Top-level Fiverr category most chosen by the scraped top sellers for this niche (e.g. 'Video & Animation', 'Graphics & Design', 'Programming & Tech', 'Writing & Translation', 'Digital Marketing', 'Music & Audio', 'Business', 'AI Services'). Pick the BEST fit for niche '${project.niche}'.",
-    "subcategory": "Exact Fiverr sub-category top sellers in the scraped data use most for this niche.",
-    "service_type": "The 'Service type' Fiverr asks for (e.g. 'AI Video', 'Logo Design', 'WordPress Development'). Match what top sellers in the scraped data picked.",
-    "why": "1 sentence: why this category/sub-category/service_type combo (cite the top-seller pattern observed)."
   },
-  "gig_metadata": [
-    { "field": "field name Fiverr asks (e.g. 'Style', 'Software', 'Voice Gender', 'Platform')", "recommended_values": ["value1","value2"], "why": "1 sentence: which top sellers picked this and why it helps ranking" }
-  ],
-  "search_tags": ["8-10 ranking tags"],
-  "description": "STRUCTURED Fiverr gig description, 1000-1150 characters total. MUST be plain text with real line breaks (\\n) and use this EXACT skeleton, adapted to the niche '${project.niche}':\\n\\nAbout this gig\\n<1 punchy opening line that promises the outcome and uses the primary keyword>\\n\\n<2-3 sentence problem→solution paragraph that mentions the primary keyword once more, naturally>\\n\\nWhat You Get: <one line summarizing tiers/scope>\\n• <deliverable 1 with **bold** key benefit>\\n• <deliverable 2>\\n• <deliverable 3>\\n• <deliverable 4>\\n\\nWhy Choose Me?\\n• **Fast & Professional Communication** — <short reason>\\n• **Unlimited Revisions** until you're 100% happy\\n• **High-Quality Delivery** tailored to your goals\\n• **Niche Expertise** in <niche / sub-niche>\\n• **On-Time Delivery** every single order\\n\\nWhat I Need From You:\\n• <input 1 specific to the niche>\\n• <input 2>\\n• <input 3>\\n\\nCall to Action: Ready to <desired buyer outcome>? **Contact me** now to get started or place your order today!\\n\\nRULES: 1000-1150 chars; primary keyword 3-5 times naturally; no markdown headers (#).",
-  "buyer_requirements": [
-    { "question": "exact question to ask buyer at order start, niche-specific", "type": "free_text|multiple_choice|attachment", "required": true, "options": ["only for multiple_choice"] }
-  ],
-  "faqs": [{"q":"...","a":"..."}],
-  "packages": {
-    "basic":   {"name":"...","price":"$X","delivery_days":N,"revisions":N,"features":["..."]},
-    "standard":{"name":"...","price":"$X","delivery_days":N,"revisions":N,"features":["..."]},
-    "premium": {"name":"...","price":"$X","delivery_days":N,"revisions":N,"features":["..."]}
-  },
-  "thumbnail_prompts": [
-    {
-      "style": "e.g. 'Bold typography + product mockup' — modeled on what top sellers in this niche actually use to win clicks",
-      "prompt": "Detailed image-gen prompt (80-140 words) sized for Fiverr's gig image of EXACTLY 1280x769 pixels. MUST include: subject specific to the niche '${project.niche}', composition for a 1280x769 horizontal canvas with safe margins, color palette inspired by top-converting Fiverr thumbnails in this niche (name the colors), lighting, 3-5 short bold headline words to overlay (high contrast, sans-serif, large), focal point (product/face/example), trust elements (badges, stars, before/after split if relevant). End with: --ar 1280:769 --no watermark, blurry, low-res, lorem-ipsum text, extra fingers --style raw"
-    }
-  ]
+  "gig_optimization": {
+    "gig_title": "max 80 chars, primary keyword at start",
+    "title_variations": [{"title":"max 80 chars","angle":"...","why_it_works":"..."}],
+    "category": {"category":"best Fiverr category","subcategory":"best subcategory","service_type":"best service type","why":"..."},
+    "gig_metadata": [{"field":"Fiverr field name","recommended_values":["value1","value2"],"why":"..."}],
+    "search_tags": ["8-10 ranking tags"],
+    "description": "1000-1150 chars. Use sections: About this gig, What You Get, Why Choose Me?, What I Need From You, Call to Action. Use real \n and bullet • markers.",
+    "buyer_requirements": [{"question":"niche-specific order question","type":"free_text|multiple_choice|attachment","required":true,"options":["only for multiple_choice"]}],
+    "faqs": [{"q":"...","a":"..."}],
+    "packages": {
+      "basic":{"name":"...","price":"$X","delivery_days":2,"revisions":1,"features":["..."]},
+      "standard":{"name":"...","price":"$X","delivery_days":3,"revisions":2,"features":["..."]},
+      "premium":{"name":"...","price":"$X","delivery_days":5,"revisions":3,"features":["..."]}
+    },
+    "thumbnail_prompts": [{"style":"...","prompt":"80-140 word image-gen prompt for 1280x769 Fiverr gig image, with bold headline words, focal point, trust elements, palette, --ar 1280:769 --no watermark, blurry, low-res, lorem-ipsum text --style raw"}]
+  }
 }
 
 REQUIREMENTS:
-- title_variations: EXACTLY 6-8 items, each ≤80 chars, distinct angles modeled on the scraped top sellers.
-- gig_metadata: 4-7 items modeled on the actual fields/values top sellers picked for this niche.
-- buyer_requirements: 4-6 niche-specific items (never generic).
-- faqs: exactly 10 items.
-- thumbnail_prompts: exactly 4 items, varied styles (typography-led, product-mockup, character/face, before-after split). EVERY prompt enforces 1280x769 sizing and reflects winning patterns for THIS niche.`,
-      "You are a Fiverr top-seller copywriter + AI image prompt engineer. Output only valid JSON. The 'description' MUST follow the exact section skeleton with real \\n line breaks and bullet • markers, total 1000-1150 characters. Adapt every line to the user's niche. Title variations and thumbnail prompts must be specific, competitive, and modeled on real top sellers in the scraped data. Each Re-run uses the variation seed to produce DIFFERENT outputs.",
+- profile_optimization.short_bio <=150 chars. profile_strength.score must equal the breakdown sum.
+- title_variations: EXACTLY 6 items, each <=80 chars.
+- gig_metadata: 4-6 niche-specific items.
+- buyer_requirements: 4-6 niche-specific items.
+- faqs: exactly 8 items.
+- thumbnail_prompts: exactly 4 varied styles modeled on high-click Fiverr thumbnails.
+- Everything must be specific to "${project.niche}" and grounded in the insights/top gigs.`,
+      "You are a Fiverr top-seller strategist. Output only valid JSON. Generate premium but concise profile and gig assets that respect all Fiverr character limits.",
     );
-    const gig_optimization = extractJson(gigText);
+    const offer = extractJson(offerText);
+    const profile_optimization = offer.profile_optimization || {};
+    const gig_optimization = offer.gig_optimization || {};
+    if (typeof profile_optimization.short_bio === "string" && profile_optimization.short_bio.length > 150) {
+      profile_optimization.short_bio = profile_optimization.short_bio.slice(0, 147).trimEnd() + "...";
+    }
 
     await admin.from("research_results").insert({
       project_id: projectId,
