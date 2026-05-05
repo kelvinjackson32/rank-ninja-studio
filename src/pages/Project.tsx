@@ -19,6 +19,9 @@ const LIMITS: Record<string, number> = {
   profile_title: 70,
 };
 
+const RUNNING_STATUSES = ["pending", "scraping", "analyzing"];
+const STUCK_AFTER_MS = 10 * 60 * 1000;
+
 const Project = () => {
   const { id } = useParams();
   const { user } = useAuth();
@@ -55,11 +58,21 @@ const Project = () => {
 
   const copy = (text: string) => { navigator.clipboard.writeText(text); toast.success("Copied"); };
 
+  const launchResearch = async (projectId: string, failureLog?: any[]) => {
+    const { error } = await supabase.functions.invoke("run-research", { body: { projectId } });
+    if (error) {
+      await supabase.from("projects").update({
+        status: "error",
+        progress_log: failureLog || [{ ts: new Date().toISOString(), msg: `❌ Research failed to start: ${error.message}` }],
+      }).eq("id", projectId);
+      throw error;
+    }
+  };
+
   const rerun = async () => {
     setRerunning(true);
     try {
-      const { error } = await supabase.functions.invoke("run-research", { body: { projectId: id } });
-      if (error) throw error;
+      await launchResearch(id!, project ? [...(project.progress_log || []), { ts: new Date().toISOString(), msg: "❌ Research failed to restart. Please try again." }] : undefined);
       toast.success("Research re-launched");
       load();
     } catch (e: any) { toast.error(e.message); } finally { setRerunning(false); }
@@ -74,7 +87,7 @@ const Project = () => {
         user_id: user.id, niche: angleTitle, secondary_keywords: sec, status: "pending",
       }).select().single();
       if (error) throw error;
-      supabase.functions.invoke("run-research", { body: { projectId: created.id } }).catch(console.error);
+      await launchResearch(created.id);
       toast.success("New gig research launched");
       nav(`/app/projects/${created.id}`);
     } catch (e: any) { toast.error(e.message); } finally { setBuilding(null); }
@@ -92,9 +105,20 @@ const Project = () => {
     URL.revokeObjectURL(url);
   };
 
+  useEffect(() => {
+    if (!project || !id || !RUNNING_STATUSES.includes(project.status)) return;
+    const lastActivity = Date.parse(project.updated_at || project.created_at || "");
+    if (!Number.isFinite(lastActivity) || Date.now() - lastActivity < STUCK_AFTER_MS) return;
+    const log = [...(project.progress_log || []), {
+      ts: new Date().toISOString(),
+      msg: "❌ Research timed out before finishing. Use Re-run to start a fresh faster scan.",
+    }];
+    supabase.from("projects").update({ status: "error", progress_log: log }).eq("id", id).then(() => load());
+  }, [project, id]);
+
   if (!project) return <AppShell><div className="p-8">Loading...</div></AppShell>;
 
-  const isRunning = project.status === "scraping" || project.status === "analyzing" || project.status === "pending";
+  const isRunning = RUNNING_STATUSES.includes(project.status);
   const canRerun = project.status === "complete" || project.status === "error";
 
   return (
