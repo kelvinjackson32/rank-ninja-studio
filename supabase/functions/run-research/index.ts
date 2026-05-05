@@ -270,8 +270,8 @@ async function runResearchWork(admin: any, userId: string, projectId: string, pr
       .eq("user_id", userId)
       .order("status")
       .order("last_used_at", { ascending: true, nullsFirst: true });
-    if (!keys || keys.length === 0)
-      throw new Error("No Apify API keys configured. Add one in Settings.");
+    if ((!keys || keys.length === 0) && !Deno.env.get("FIRECRAWL_API_KEY"))
+      throw new Error("No scraper is configured. Add an Apify API key in Settings and try again.");
 
     const queries = [
       project.niche,
@@ -282,8 +282,8 @@ async function runResearchWork(admin: any, userId: string, projectId: string, pr
     for (const q of queries) {
       await appendLog(admin, projectId, `🌐 Scraping Fiverr for: "${q}"`);
       let success = false;
-      let lastError = "";
-      for (const key of keys.filter((k: any) => k.status !== "rate_limited").slice(0, MAX_KEYS_PER_QUERY)) {
+      let lastError = keys?.length ? "" : "No Apify key saved; using backup scraper";
+      for (const key of (keys || []).filter((k: any) => k.status !== "rate_limited").slice(0, MAX_KEYS_PER_QUERY)) {
         if (key.status === "rate_limited") continue;
         const actorId = key.actor_id || "piotrv1001/fiverr-listings-scraper";
         try {
