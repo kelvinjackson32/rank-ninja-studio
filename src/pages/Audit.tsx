@@ -137,6 +137,7 @@ const Audit = () => {
   const [profileAudit, setProfileAudit] = useState<Audit | null>(null);
   const [ranked, setRanked] = useState<RankedGig[]>([]);
   const [failedGigs, setFailedGigs] = useState<string[]>([]);
+  const [blockedNote, setBlockedNote] = useState<string | null>(null);
 
   const updateGig = (i: number, v: string) => setGigUrls((arr) => arr.map((u, idx) => (idx === i ? v : u)));
   const addGig = () => setGigUrls((arr) => [...arr, ""]);
