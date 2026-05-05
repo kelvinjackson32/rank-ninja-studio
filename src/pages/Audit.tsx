@@ -240,11 +240,21 @@ const Audit = () => {
           </CardContent>
         </Card>
 
+        {blockedNote && (
+          <Card className="mb-4 border-warning/40 bg-warning/5">
+            <CardContent className="p-3 text-sm flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 text-warning mt-0.5 shrink-0" />
+              <span className="text-muted-foreground">{blockedNote}</span>
+            </CardContent>
+          </Card>
+        )}
+
         {failedGigs.length > 0 && (
           <Card className="mb-4 border-destructive/40 bg-destructive/5">
             <CardContent className="p-3 text-sm">
-              <span className="font-semibold text-destructive">Couldn't scrape:</span>{" "}
-              <span className="text-muted-foreground">{failedGigs.join(", ")}</span>
+              <span className="font-semibold text-destructive">Fiverr blocked scraping for:</span>{" "}
+              <span className="text-muted-foreground break-all">{failedGigs.join(", ")}</span>
+              <div className="text-xs text-muted-foreground mt-1">We still ran an AI audit using the URL + niche context.</div>
             </CardContent>
           </Card>
         )}
