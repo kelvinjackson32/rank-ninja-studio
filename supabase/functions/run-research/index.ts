@@ -367,7 +367,7 @@ async function runResearchWork(admin: any, userId: string, projectId: string, pr
     );
     await admin
       .from("projects")
-      .update({ status: "analyzing" })
+      .update({ status: "analyzing", updated_at: new Date().toISOString() })
       .eq("id", projectId);
 
     // Compact scraped data for AI — include order/queue signals + source URLs
@@ -568,7 +568,7 @@ REQUIREMENTS:
 
     await admin
       .from("projects")
-      .update({ status: "complete" })
+      .update({ status: "complete", updated_at: new Date().toISOString() })
       .eq("id", projectId);
     await appendLog(
       admin,
