@@ -276,14 +276,14 @@ async function runResearchWork(admin: any, userId: string, projectId: string, pr
     const queries = [
       project.niche,
       ...(project.secondary_keywords || []),
-    ].filter(Boolean);
+    ].filter(Boolean).slice(0, 1 + MAX_SECONDARY_KEYWORDS);
     const allItems: any[] = [];
 
     for (const q of queries) {
       await appendLog(admin, projectId, `🌐 Scraping Fiverr for: "${q}"`);
       let success = false;
       let lastError = "";
-      for (const key of keys) {
+      for (const key of keys.filter((k: any) => k.status !== "rate_limited").slice(0, MAX_KEYS_PER_QUERY)) {
         if (key.status === "rate_limited") continue;
         const actorId = key.actor_id || "piotrv1001/fiverr-listings-scraper";
         try {
@@ -292,19 +292,19 @@ async function runResearchWork(admin: any, userId: string, projectId: string, pr
             projectId,
             `   → Using key "${key.name}" (actor: ${actorId})`,
           );
-          // Scrape pages 1, 2, 3 explicitly
-          const pageUrls = [1, 2, 3].map((page) =>
+          // Scrape the first 2 pages for speed/reliability, then let AI extrapolate patterns.
+          const pageUrls = [1, 2].map((page) =>
             `https://www.fiverr.com/search/gigs?query=${encodeURIComponent(q)}&page=${page}`,
           );
           const items = await runApifyActor(key.api_key, actorId, {
             // piotrv1001/fiverr-listings-scraper expects `searchUrls` as string URLs.
             searchUrls: pageUrls,
-            maxItemsPerUrl: 48,
+            maxItemsPerUrl: 24,
             // Compatibility with other community actors (epctex, etc.)
             startUrls: pageUrls.map((url) => ({ url })),
             search: q,
-            maxItems: 144,
-            maxPages: 3,
+            maxItems: 48,
+            maxPages: 2,
           });
           await admin
             .from("api_keys")
@@ -314,10 +314,14 @@ async function runResearchWork(admin: any, userId: string, projectId: string, pr
               error_message: null,
             })
             .eq("id", key.id);
-          allItems.push(...items.map((it: any) => ({ ...it, _query: q })));
-          await appendLog(admin, projectId, `   ✓ Got ${items.length} gigs`);
-          success = true;
-          break;
+          if (items.length > 0) {
+            allItems.push(...items.map((it: any) => ({ ...it, _query: q })));
+            await appendLog(admin, projectId, `   ✓ Got ${items.length} gigs`);
+            success = true;
+            break;
+          }
+          lastError = "Scraper returned 0 gigs";
+          await appendLog(admin, projectId, `   ⚠ Key "${key.name}" returned 0 gigs; trying fallback`);
         } catch (e: any) {
           const status = e.status === 429 ? "rate_limited" : "error";
           lastError = e.message || String(e);
