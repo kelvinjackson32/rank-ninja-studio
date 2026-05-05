@@ -51,7 +51,7 @@ const Landing = () => {
             </Button>
           </div>
           <div className="mt-16 grid grid-cols-3 max-w-2xl mx-auto gap-6 text-left">
-            {[["Pages Analyzed","1,2,3"],["Top Sellers", "Decoded"],["AI Generation","Realtime"]].map(([k,v]) => (
+            {[["Pages Analyzed","Top 1-3"],["Top Sellers", "Decoded"],["AI Generation","Realtime"]].map(([k,v]) => (
               <div key={k as string} className="surface-card rounded-lg p-4">
                 <div className="text-2xl font-bold text-gradient font-mono">{v}</div>
                 <div className="text-xs text-muted-foreground uppercase tracking-wider mt-1">{k}</div>
