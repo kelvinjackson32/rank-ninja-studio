@@ -7,6 +7,26 @@ const corsHeaders = {
 };
 
 const APIFY_BASE = "https://api.apify.com/v2";
+const APIFY_SYNC_TIMEOUT_SECONDS = 55;
+const FETCH_TIMEOUT_MS = 65_000;
+const AI_TIMEOUT_MS = 70_000;
+const MAX_KEYS_PER_QUERY = 2;
+const MAX_SECONDARY_KEYWORDS = 1;
+
+async function fetchWithTimeout(url: string, init: RequestInit = {}, timeoutMs = FETCH_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (e: any) {
+    if (e?.name === "AbortError") {
+      throw new Error(`Request timed out after ${Math.round(timeoutMs / 1000)}s`);
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 async function appendLog(supabase: any, projectId: string, msg: string) {
   const { data: project } = await supabase
@@ -29,12 +49,12 @@ async function runApifyActor(
 ): Promise<any[]> {
   // Apify actor IDs may contain '/' which must be encoded as '~'
   const safeActorId = actorId.replace(/\//g, "~");
-  const url = `${APIFY_BASE}/acts/${safeActorId}/run-sync-get-dataset-items?token=${apiKey}&timeout=120`;
-  const resp = await fetch(url, {
+  const url = `${APIFY_BASE}/acts/${safeActorId}/run-sync-get-dataset-items?token=${apiKey}&timeout=${APIFY_SYNC_TIMEOUT_SECONDS}`;
+  const resp = await fetchWithTimeout(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
-  });
+  }, (APIFY_SYNC_TIMEOUT_SECONDS + 10) * 1000);
   if (!resp.ok) {
     const text = await resp.text();
     const runId = text.match(/run ID:\s*([A-Za-z0-9_-]+)/)?.[1];
@@ -45,12 +65,13 @@ async function runApifyActor(
     err.status = resp.status;
     throw err;
   }
-  return await resp.json();
+  const data = await resp.json();
+  return Array.isArray(data) ? data : (data?.items || data?.data || []);
 }
 
 async function getApifyRunLog(apiKey: string, runId: string): Promise<string> {
   try {
-    const resp = await fetch(`${APIFY_BASE}/logs/${runId}?token=${apiKey}`);
+    const resp = await fetchWithTimeout(`${APIFY_BASE}/logs/${runId}?token=${apiKey}`, {}, 8_000);
     if (!resp.ok) return "";
     const text = await resp.text();
     return text.split("\n").filter(Boolean).slice(-8).join("\n").slice(0, 900);
