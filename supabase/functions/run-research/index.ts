@@ -85,19 +85,19 @@ async function scrapeWithFirecrawl(query: string): Promise<any[]> {
   const key = Deno.env.get("FIRECRAWL_API_KEY");
   if (!key) throw new Error("FIRECRAWL_API_KEY missing");
   const items: any[] = [];
-  for (const page of [1, 2, 3]) {
+  for (const page of [1, 2]) {
     const url = `https://www.fiverr.com/search/gigs?query=${encodeURIComponent(query)}&page=${page}`;
-    const resp = await fetch("https://api.firecrawl.dev/v2/scrape", {
+    const resp = await fetchWithTimeout("https://api.firecrawl.dev/v2/scrape", {
       method: "POST",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         url,
         formats: ["markdown", "links"],
         onlyMainContent: true,
-        waitFor: 2500,
+        waitFor: 1200,
         location: { country: "US", languages: ["en"] },
       }),
-    });
+    }, 35_000);
     if (!resp.ok) {
       const t = await resp.text();
       throw new Error(`Firecrawl ${resp.status}: ${t.slice(0, 200)}`);
@@ -143,7 +143,7 @@ async function scrapeWithFirecrawl(query: string): Promise<any[]> {
 async function callAI(prompt: string, system: string): Promise<string> {
   const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
   if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY missing");
-  const resp = await fetch(
+  const resp = await fetchWithTimeout(
     "https://ai.gateway.lovable.dev/v1/chat/completions",
     {
       method: "POST",
@@ -159,6 +159,7 @@ async function callAI(prompt: string, system: string): Promise<string> {
         ],
       }),
     },
+    AI_TIMEOUT_MS,
   );
   if (resp.status === 429)
     throw new Error("AI rate limit. Try again in a moment.");
