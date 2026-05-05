@@ -377,7 +377,7 @@ async function runResearchWork(admin: any, userId: string, projectId: string, pr
       if (u.startsWith("/")) return `https://www.fiverr.com${u}`;
       return null;
     };
-    const compacted = allItems.slice(0, 90).map((g: any) => {
+    const compacted = allItems.slice(0, 60).map((g: any) => {
       const sellerName = g.seller?.name || g.sellerName || (typeof g.seller === "string" ? g.seller : null) || g.username;
       const gigUrl = normalizeUrl(g.url || g.gigUrl || g.link || g.gigLink || g.permalink);
       const sellerUrl = normalizeUrl(g.seller?.url || g.seller?.profileUrl || g.sellerUrl || g.sellerProfileUrl)
@@ -401,15 +401,15 @@ async function runResearchWork(admin: any, userId: string, projectId: string, pr
       };
     });
 
-    const dataBlob = JSON.stringify(compacted).slice(0, 38000);
+    const dataBlob = JSON.stringify(compacted).slice(0, 26000);
 
-    await appendLog(admin, projectId, `🤖 AI analyzing winning patterns across pages 1-3...`);
+    await appendLog(admin, projectId, `🤖 AI analyzing winning patterns across the strongest first-page data...`);
 
     // Variation seed so each Re-run produces fresh niche angles + edited titles/sellers/etc.
     const variationSeed = Math.floor(Math.random() * 1_000_000);
 
     const insightsText = await callAI(
-      `Analyze these REAL Fiverr gigs (pages 1-3) scraped for niche "${project.niche}":\n${dataBlob}\n\nVariation seed (use to ensure this run produces DIFFERENT niche_angles than any previous run): ${variationSeed}\n\nReturn JSON with these EXACT keys (no extras):
+      `Analyze these REAL Fiverr gigs scraped for niche "${project.niche}":\n${dataBlob}\n\nVariation seed (use to ensure this run produces DIFFERENT niche_angles than any previous run): ${variationSeed}\n\nReturn JSON with these EXACT keys (no extras):
 {
   "competition_level": "low|medium|high|saturated",
   "competition_summary": "2-3 sentences on the market state",
