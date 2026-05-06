@@ -16,6 +16,7 @@ const LIMITS: Record<string, number> = {
   gig_title: 80,
   description: 1200,
   short_bio: 150,
+  about: 500,
   profile_title: 70,
 };
 
