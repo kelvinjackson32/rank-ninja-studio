@@ -475,6 +475,8 @@ For "niche_angles": return EXACTLY 3 distinct angles. Each must be a REFINEMENT/
     }
 
     await appendLog(admin, projectId, `✏️ Generating profile, gig package, requirements, and thumbnails...`);
+    const targetDuration = Number(project.target_duration_seconds) || 30;
+    const characterLock = project.character_lock !== false;
     const offerText = await callAI(
       `Based on this Fiverr competitor research for "${project.niche}":
 Insights: ${JSON.stringify(insights)}
@@ -520,15 +522,16 @@ Generate the complete Fiverr profile and gig package in ONE valid JSON object wi
       {
         "concept_title": "short name of the video concept (e.g. 'Animated Nursery Rhyme — Counting Stars')",
         "concept_summary": "1-2 sentence description of the demo video idea, aligned to the gig style/niche",
-        "duration_seconds": 30,
+        "duration_seconds": ${targetDuration},
         "visual_style": "art direction (e.g. 3D Pixar-like, flat 2D cartoon, cinematic UGC selfie, anime, claymation)",
+        "character_appearance_sheet": ${characterLock ? `"a single ready-to-paste markdown 'appearance sheet' that LOCKS every recurring character: NAME, age, gender, ethnicity, hair (color/style), eyes, face shape, signature outfit (top/bottom/shoes/accessories), color palette (HEX), art style line. Format as: '### Character: <NAME>\\n- Age: ...\\n- ...'. Include 1-3 characters total. EVERY scene/image/video prompt below MUST reference these characters by NAME and quote the exact outfit + art style line so they stay 100% consistent across scenes."` : `"empty string — character lock is OFF"`},
         "stage_prompts": {
-          "stage_1_ideas": "ready-to-paste prompt the user can send to Gemini/Grok/ChatGPT asking for 15 LATEST trending sub-ideas for this concept, referencing YouTube/Google trends, niche '${project.niche}', and the visual_style",
-          "stage_2_lyrics_or_script": "ready-to-paste prompt to generate ONLY the lyrics (for music gigs) or the spoken script (for UGC/talking gigs) for the chosen idea — must say 'don't generate the music/voice, just the lyrics/script'. Mention target duration and tone.",
-          "stage_3_video_scene_script": "ready-to-paste prompt to break the lyrics/script into a SECOND-BY-SECOND scene-by-scene video script (timestamps, action, camera, mood) matching duration_seconds",
-          "stage_4_scene_image_prompts": "ready-to-paste prompt asking the AI to output an image-generation prompt for EACH scene (for Midjourney / Flux / Nano Banana / Google Flow), aspect 16:9, no text, consistent style",
-          "stage_5_character_prompts": "ready-to-paste prompt to generate a separate image-gen prompt for EACH recurring character used in the video, with full appearance lock (face, outfit, palette) so they stay consistent across scenes",
-          "stage_6_final_scene_assembly": "ready-to-paste prompt that tells the AI: 'I have generated the characters. Now give me a Google Flow / Veo / Kling text-to-video prompt for EACH scene that combines the right character(s) into that scene, referencing scene number, character name, action, camera move, 5s clip'"
+          "stage_1_ideas": "ready-to-paste prompt the user can send to Gemini/Grok/ChatGPT asking for 15 LATEST trending sub-ideas for this concept, referencing YouTube/Google trends, niche '${project.niche}', target length ${targetDuration}s, and the visual_style",
+          "stage_2_lyrics_or_script": "ready-to-paste prompt to generate ONLY the lyrics (for music gigs) or the spoken script (for UGC/talking gigs) for the chosen idea — must say 'don't generate the music/voice, just the lyrics/script'. Word count MUST match a ${targetDuration}-second video (~${Math.round(targetDuration * 2.3)} words for spoken, or ${Math.round(targetDuration / 7)} short verses for music). State the duration explicitly.",
+          "stage_3_video_scene_script": "ready-to-paste prompt to break the lyrics/script into a SECOND-BY-SECOND scene-by-scene video script of EXACTLY ${targetDuration} seconds total, divided into ${Math.max(3, Math.ceil(targetDuration / 5))} scenes of ~5s each, with explicit timestamps like '[0:00-0:05]', action, camera, mood. Total runtime MUST equal ${targetDuration}s.",
+          "stage_4_scene_image_prompts": "ready-to-paste prompt asking the AI to output an image-generation prompt for EACH of the ~${Math.max(3, Math.ceil(targetDuration / 5))} scenes (for Midjourney / Flux / Nano Banana / Google Flow), aspect 16:9, no text, consistent style.${characterLock ? " EVERY scene prompt MUST start by quoting the locked appearance sheet line for whichever character appears, by NAME (e.g. 'Mia — purple dungarees, yellow tee, pixar-style')." : ""}",
+          "stage_5_character_prompts": "ready-to-paste prompt to generate a separate image-gen prompt for EACH recurring character used in the video, with full appearance lock (face, outfit, palette).${characterLock ? " The prompt MUST instruct the AI to copy the appearance sheet verbatim for each character so they stay identical across every scene." : ""}",
+          "stage_6_final_scene_assembly": "ready-to-paste prompt that tells the AI: 'I have generated the characters. Now give me a Google Flow / Veo / Kling text-to-video prompt for EACH of the ~${Math.max(3, Math.ceil(targetDuration / 5))} scenes that combines the right character(s) into that scene, referencing scene number, character NAME (must match appearance sheet), action, camera move, 5s clip — total ${targetDuration}s.'"
         },
         "tools_suggested": ["e.g. Suno AI for music", "Google Flow / Veo 3 for video", "Canva for final cut"]
       }
@@ -546,6 +549,8 @@ REQUIREMENTS:
 - packages: every feature string MAX 100 characters (hard limit, Fiverr enforces this).
 - is_video_gig: set to true ONLY if the niche is a video deliverable that Fiverr requires a video upload for (AI video, UGC video, music video, kids music video, video editing, video ads, animation, faceless YouTube, motion graphics, explainer video, etc). Otherwise false.
 - video_concepts: if is_video_gig is true → return EXACTLY 2 distinct demo-video concepts aligned to the gig style. If false → return empty array [].
+- EVERY video_concept.duration_seconds MUST equal ${targetDuration}. Stage 3 timestamps and Stage 6 scene counts MUST add up to exactly ${targetDuration} seconds.
+- character_lock is ${characterLock ? "ON — fill character_appearance_sheet with a real markdown sheet (1-3 named characters with full appearance + outfit + HEX palette) and ensure stage_4/5/6 prompts EXPLICITLY tell the AI to reuse those exact character names, outfits, and art style line for EVERY scene." : "OFF — set character_appearance_sheet to empty string."}
 - Every stage_prompts.* must be a COMPLETE, copy-pasteable prompt the user can drop into Gemini/Grok/ChatGPT with no edits — write it in first person as if the user is asking the AI.
 - Everything must be specific to "${project.niche}" and grounded in the insights/top gigs.`,
       "You are a Fiverr top-seller strategist. Output only valid JSON. Generate premium but concise profile and gig assets that respect all Fiverr character limits.",

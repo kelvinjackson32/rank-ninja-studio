@@ -12,6 +12,8 @@ import { toast } from "sonner";
 
 const MAX_BULK = 5;
 
+const DURATIONS = [15, 30, 60];
+
 const NewProject = () => {
   const { user } = useAuth();
   const nav = useNavigate();
@@ -20,6 +22,8 @@ const NewProject = () => {
   const [secondary, setSecondary] = useState<string[]>([""]);
   const [bulkNiches, setBulkNiches] = useState<string[]>(["", ""]);
   const [loading, setLoading] = useState(false);
+  const [targetDuration, setTargetDuration] = useState<number>(30);
+  const [characterLock, setCharacterLock] = useState<boolean>(true);
 
   const launchResearch = async (projectId: string) => {
     const { error } = await supabase.functions.invoke("run-research", { body: { projectId } });
@@ -39,7 +43,7 @@ const NewProject = () => {
         const niches = bulkNiches.map(n => n.trim()).filter(Boolean).slice(0, MAX_BULK);
         if (niches.length < 2) { toast.error("Enter at least 2 niches for bulk mode"); return; }
         const groupId = crypto.randomUUID();
-        const inserts = niches.map(n => ({ user_id: user!.id, niche: n, secondary_keywords: [], status: "pending", bulk_group_id: groupId }));
+        const inserts = niches.map(n => ({ user_id: user!.id, niche: n, secondary_keywords: [], status: "pending", bulk_group_id: groupId, target_duration_seconds: targetDuration, character_lock: characterLock }));
         const { data: created, error } = await supabase.from("projects").insert(inserts).select();
         if (error) throw error;
         const launched = await Promise.allSettled((created || []).map((p: any) => launchResearch(p.id)));
@@ -54,6 +58,7 @@ const NewProject = () => {
       const sec = secondary.map(s => s.trim()).filter(Boolean).slice(0, 2);
       const { data: project, error } = await supabase.from("projects").insert({
         user_id: user!.id, niche: niche.trim(), secondary_keywords: sec, status: "pending",
+        target_duration_seconds: targetDuration, character_lock: characterLock,
       }).select().single();
       if (error) throw error;
       await launchResearch(project.id);
@@ -156,6 +161,35 @@ const NewProject = () => {
               <p className="text-xs text-muted-foreground mt-3">Each niche runs a full deep research in parallel. You'll land on a comparison table to pick the winner.</p>
             </div>
           )}
+
+          <div className="border border-border rounded-lg p-4 bg-muted/10 space-y-4">
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-[10px] uppercase tracking-widest text-primary">// Video Demo Settings</span>
+            </div>
+            <div>
+              <Label className="font-mono text-xs uppercase tracking-wider">Target Video Duration</Label>
+              <p className="text-xs text-muted-foreground mt-1">Stage prompts and per-scene timestamps will auto-match this length.</p>
+              <div className="flex gap-2 mt-2">
+                {DURATIONS.map((d) => (
+                  <button
+                    key={d}
+                    type="button"
+                    onClick={() => setTargetDuration(d)}
+                    className={`px-4 py-2 rounded-md font-mono text-sm border transition-colors ${targetDuration === d ? "bg-gradient-to-r from-primary to-secondary text-primary-foreground border-transparent" : "bg-input/40 border-border hover:border-primary/40"}`}
+                  >
+                    {d}s
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <Label className="font-mono text-xs uppercase tracking-wider">Character Lock</Label>
+                <p className="text-xs text-muted-foreground mt-1">Forces every scene prompt to reuse the same character names, outfits & art style via an "appearance sheet".</p>
+              </div>
+              <Switch checked={characterLock} onCheckedChange={setCharacterLock} />
+            </div>
+          </div>
 
           <Button onClick={launch} disabled={loading} size="lg" className="w-full h-14 text-base bg-gradient-to-r from-primary to-secondary text-primary-foreground hover:opacity-90 animate-pulse-glow">
             <Rocket className="w-5 h-5 mr-2" />
