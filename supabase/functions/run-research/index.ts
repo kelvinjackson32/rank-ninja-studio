@@ -475,6 +475,8 @@ For "niche_angles": return EXACTLY 3 distinct angles. Each must be a REFINEMENT/
     }
 
     await appendLog(admin, projectId, `✏️ Generating profile, gig package, requirements, and thumbnails...`);
+    const targetDuration = Number(project.target_duration_seconds) || 30;
+    const characterLock = project.character_lock !== false;
     const offerText = await callAI(
       `Based on this Fiverr competitor research for "${project.niche}":
 Insights: ${JSON.stringify(insights)}
