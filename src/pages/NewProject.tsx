@@ -162,6 +162,35 @@ const NewProject = () => {
             </div>
           )}
 
+          <div className="border border-border rounded-lg p-4 bg-muted/10 space-y-4">
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-[10px] uppercase tracking-widest text-primary">// Video Demo Settings</span>
+            </div>
+            <div>
+              <Label className="font-mono text-xs uppercase tracking-wider">Target Video Duration</Label>
+              <p className="text-xs text-muted-foreground mt-1">Stage prompts and per-scene timestamps will auto-match this length.</p>
+              <div className="flex gap-2 mt-2">
+                {DURATIONS.map((d) => (
+                  <button
+                    key={d}
+                    type="button"
+                    onClick={() => setTargetDuration(d)}
+                    className={`px-4 py-2 rounded-md font-mono text-sm border transition-colors ${targetDuration === d ? "bg-gradient-to-r from-primary to-secondary text-primary-foreground border-transparent" : "bg-input/40 border-border hover:border-primary/40"}`}
+                  >
+                    {d}s
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <Label className="font-mono text-xs uppercase tracking-wider">Character Lock</Label>
+                <p className="text-xs text-muted-foreground mt-1">Forces every scene prompt to reuse the same character names, outfits & art style via an "appearance sheet".</p>
+              </div>
+              <Switch checked={characterLock} onCheckedChange={setCharacterLock} />
+            </div>
+          </div>
+
           <Button onClick={launch} disabled={loading} size="lg" className="w-full h-14 text-base bg-gradient-to-r from-primary to-secondary text-primary-foreground hover:opacity-90 animate-pulse-glow">
             <Rocket className="w-5 h-5 mr-2" />
             {loading ? "Launching..." : bulk ? "Launch Bulk Research & Compare" : "Start Deep Research & Generate Everything"}
