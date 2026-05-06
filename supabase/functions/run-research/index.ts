@@ -510,21 +510,43 @@ Generate the complete Fiverr profile and gig package in ONE valid JSON object wi
     "buyer_requirements": [{"question":"niche-specific order question","type":"free_text|multiple_choice|attachment","required":true,"options":["only for multiple_choice"]}],
     "faqs": [{"q":"...","a":"..."}],
     "packages": {
-      "basic":{"name":"...","price":"$X","delivery_days":2,"revisions":1,"features":["..."]},
-      "standard":{"name":"...","price":"$X","delivery_days":3,"revisions":2,"features":["..."]},
-      "premium":{"name":"...","price":"$X","delivery_days":5,"revisions":3,"features":["..."]}
+      "basic":{"name":"...","price":"$X","delivery_days":2,"revisions":1,"features":["each feature MAX 100 chars"]},
+      "standard":{"name":"...","price":"$X","delivery_days":3,"revisions":2,"features":["each feature MAX 100 chars"]},
+      "premium":{"name":"...","price":"$X","delivery_days":5,"revisions":3,"features":["each feature MAX 100 chars"]}
     },
-    "thumbnail_prompts": [{"style":"...","prompt":"80-140 word image-gen prompt for 1280x769 Fiverr gig image, with bold headline words, focal point, trust elements, palette, --ar 1280:769 --no watermark, blurry, low-res, lorem-ipsum text --style raw"}]
+    "thumbnail_prompts": [{"style":"...","prompt":"80-140 word image-gen prompt for 1280x769 Fiverr gig image, with bold headline words, focal point, trust elements, palette, --ar 1280:769 --no watermark, blurry, low-res, lorem-ipsum text --style raw"}],
+    "is_video_gig": true_or_false_boolean_indicating_if_this_niche_requires_a_demo_video_upload_on_fiverr,
+    "video_concepts": [
+      {
+        "concept_title": "short name of the video concept (e.g. 'Animated Nursery Rhyme — Counting Stars')",
+        "concept_summary": "1-2 sentence description of the demo video idea, aligned to the gig style/niche",
+        "duration_seconds": 30,
+        "visual_style": "art direction (e.g. 3D Pixar-like, flat 2D cartoon, cinematic UGC selfie, anime, claymation)",
+        "stage_prompts": {
+          "stage_1_ideas": "ready-to-paste prompt the user can send to Gemini/Grok/ChatGPT asking for 15 LATEST trending sub-ideas for this concept, referencing YouTube/Google trends, niche '${project.niche}', and the visual_style",
+          "stage_2_lyrics_or_script": "ready-to-paste prompt to generate ONLY the lyrics (for music gigs) or the spoken script (for UGC/talking gigs) for the chosen idea — must say 'don't generate the music/voice, just the lyrics/script'. Mention target duration and tone.",
+          "stage_3_video_scene_script": "ready-to-paste prompt to break the lyrics/script into a SECOND-BY-SECOND scene-by-scene video script (timestamps, action, camera, mood) matching duration_seconds",
+          "stage_4_scene_image_prompts": "ready-to-paste prompt asking the AI to output an image-generation prompt for EACH scene (for Midjourney / Flux / Nano Banana / Google Flow), aspect 16:9, no text, consistent style",
+          "stage_5_character_prompts": "ready-to-paste prompt to generate a separate image-gen prompt for EACH recurring character used in the video, with full appearance lock (face, outfit, palette) so they stay consistent across scenes",
+          "stage_6_final_scene_assembly": "ready-to-paste prompt that tells the AI: 'I have generated the characters. Now give me a Google Flow / Veo / Kling text-to-video prompt for EACH scene that combines the right character(s) into that scene, referencing scene number, character name, action, camera move, 5s clip'"
+        },
+        "tools_suggested": ["e.g. Suno AI for music", "Google Flow / Veo 3 for video", "Canva for final cut"]
+      }
+    ]
   }
 }
 
 REQUIREMENTS:
-- profile_optimization.short_bio <=150 chars. profile_strength.score must equal the breakdown sum.
+- profile_optimization.short_bio <=150 chars. profile_optimization.about <=500 chars. profile_strength.score must equal the breakdown sum.
 - title_variations: EXACTLY 6 items, each <=80 chars.
 - gig_metadata: 4-6 niche-specific items.
 - buyer_requirements: 4-6 niche-specific items.
 - faqs: exactly 8 items.
-- thumbnail_prompts: exactly 4 varied styles modeled on high-click Fiverr thumbnails.
+- thumbnail_prompts: EXACTLY 2 varied styles modeled on high-click Fiverr thumbnails.
+- packages: every feature string MAX 100 characters (hard limit, Fiverr enforces this).
+- is_video_gig: set to true ONLY if the niche is a video deliverable that Fiverr requires a video upload for (AI video, UGC video, music video, kids music video, video editing, video ads, animation, faceless YouTube, motion graphics, explainer video, etc). Otherwise false.
+- video_concepts: if is_video_gig is true → return EXACTLY 2 distinct demo-video concepts aligned to the gig style. If false → return empty array [].
+- Every stage_prompts.* must be a COMPLETE, copy-pasteable prompt the user can drop into Gemini/Grok/ChatGPT with no edits — write it in first person as if the user is asking the AI.
 - Everything must be specific to "${project.niche}" and grounded in the insights/top gigs.`,
       "You are a Fiverr top-seller strategist. Output only valid JSON. Generate premium but concise profile and gig assets that respect all Fiverr character limits.",
     );
