@@ -615,6 +615,81 @@ const ThumbnailsView = ({ gig, copy }: any) => {
   );
 };
 
+const STAGE_META: { key: string; label: string; hint: string }[] = [
+  { key: "stage_1_ideas", label: "Stage 1 — Get 15 trending ideas", hint: "Paste into Gemini / Grok / ChatGPT to brainstorm latest sub-ideas." },
+  { key: "stage_2_lyrics_or_script", label: "Stage 2 — Generate lyrics / script", hint: "After picking your favorite idea, use this to get the full lyrics or talking script (no audio yet)." },
+  { key: "stage_3_video_scene_script", label: "Stage 3 — Second-by-second scene script", hint: "Once you've made the audio (e.g. on Suno), break it into a timed scene plan." },
+  { key: "stage_4_scene_image_prompts", label: "Stage 4 — Per-scene image prompts", hint: "Get a Midjourney / Flux / Nano Banana prompt for every scene." },
+  { key: "stage_5_character_prompts", label: "Stage 5 — Character lock-in prompts", hint: "Generate consistent character sheets so they look the same across every scene." },
+  { key: "stage_6_final_scene_assembly", label: "Stage 6 — Google Flow / Veo video prompts", hint: "Combine your characters into final 5s text-to-video prompts per scene." },
+];
+
+const VideoConceptsView = ({ gig, niche, copy }: any) => {
+  const concepts = gig?.video_concepts || [];
+  if (concepts.length === 0) {
+    return (
+      <div className="surface-card rounded-lg p-8 text-center text-muted-foreground">
+        No video demo concepts for this niche. (Only generated for video-based gigs.)
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-6">
+      <div className="surface-card rounded-lg p-5 border-primary/30 bg-primary/5">
+        <div className="flex items-center gap-2 mb-1">
+          <Video className="w-4 h-4 text-primary" />
+          <h3 className="font-semibold text-sm uppercase tracking-wider font-mono text-primary">Demo video workflow for "{niche}"</h3>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          Fiverr requires a demo video upload for this gig type. Follow the 6 stages below — each stage is a copy-paste prompt
+          you give to an AI assistant (Gemini / Grok / ChatGPT). Use Suno AI for music, Google Flow / Veo for video, and Canva to finish the cut.
+        </p>
+      </div>
+
+      {concepts.map((c: any, idx: number) => (
+        <div key={idx} className="surface-card rounded-lg p-5 space-y-4">
+          <div className="flex items-start justify-between gap-3 flex-wrap">
+            <div>
+              <div className="font-mono text-xs text-secondary uppercase tracking-wider">Concept #{idx + 1}{c.duration_seconds ? ` · ${c.duration_seconds}s` : ""}</div>
+              <div className="font-bold text-lg mt-1">{c.concept_title}</div>
+              {c.concept_summary && <p className="text-sm text-muted-foreground mt-1 max-w-2xl">{c.concept_summary}</p>}
+              {c.visual_style && <div className="text-xs mt-2"><span className="text-muted-foreground">Visual style: </span><span className="font-mono">{c.visual_style}</span></div>}
+            </div>
+            {Array.isArray(c.tools_suggested) && c.tools_suggested.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 max-w-xs justify-end">
+                {c.tools_suggested.map((t: string) => (
+                  <Badge key={t} variant="outline" className="text-[10px] font-mono">{t}</Badge>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-3">
+            {STAGE_META.map((s, i) => {
+              const prompt = c.stage_prompts?.[s.key];
+              if (!prompt) return null;
+              return (
+                <div key={s.key} className="border border-border rounded-md p-3 bg-muted/10">
+                  <div className="flex items-start justify-between gap-2 mb-1">
+                    <div>
+                      <div className="font-semibold text-sm">{s.label}</div>
+                      <div className="text-xs text-muted-foreground">{s.hint}</div>
+                    </div>
+                    <Button size="sm" variant="outline" onClick={() => copy(prompt)}>
+                      <Copy className="w-3.5 h-3.5 mr-1" />Copy
+                    </Button>
+                  </div>
+                  <pre className="text-xs font-mono whitespace-pre-wrap bg-background/60 rounded-md p-3 mt-2 leading-relaxed">{prompt}</pre>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+};
+
 const ProfileView = ({ profile, resultId, onUpdate, copy }: any) => {
   if (!profile) return null;
   const f = (label: string, key: string, multi = false) => <Field label={label} value={profile[key]} resultId={resultId} section="profile" fieldKey={key} onUpdate={onUpdate} copy={copy} multiline={multi} />;
