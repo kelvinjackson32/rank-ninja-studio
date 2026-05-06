@@ -185,6 +185,9 @@ const Project = () => {
               <TabsTrigger value="profile"><User className="w-4 h-4 mr-1" />Profile</TabsTrigger>
               <TabsTrigger value="gig"><Package className="w-4 h-4 mr-1" />Gig</TabsTrigger>
               <TabsTrigger value="thumbnails"><ImageIcon className="w-4 h-4 mr-1" />Thumbnails</TabsTrigger>
+              {result.gig_optimization?.is_video_gig && (
+                <TabsTrigger value="video"><Film className="w-4 h-4 mr-1" />Video Concepts</TabsTrigger>
+              )}
             </TabsList>
 
             <TabsContent value="insights" className="mt-6 space-y-4">
@@ -215,6 +218,12 @@ const Project = () => {
             <TabsContent value="thumbnails" className="mt-6 space-y-4">
               <ThumbnailsView gig={result.gig_optimization} copy={copy} />
             </TabsContent>
+
+            {result.gig_optimization?.is_video_gig && (
+              <TabsContent value="video" className="mt-6 space-y-4">
+                <VideoConceptsView gig={result.gig_optimization} niche={project.niche} copy={copy} />
+              </TabsContent>
+            )}
           </Tabs>
         )}
       </div>
