@@ -12,6 +12,8 @@ import { toast } from "sonner";
 
 const MAX_BULK = 5;
 
+const DURATIONS = [15, 30, 60];
+
 const NewProject = () => {
   const { user } = useAuth();
   const nav = useNavigate();
@@ -20,6 +22,8 @@ const NewProject = () => {
   const [secondary, setSecondary] = useState<string[]>([""]);
   const [bulkNiches, setBulkNiches] = useState<string[]>(["", ""]);
   const [loading, setLoading] = useState(false);
+  const [targetDuration, setTargetDuration] = useState<number>(30);
+  const [characterLock, setCharacterLock] = useState<boolean>(true);
 
   const launchResearch = async (projectId: string) => {
     const { error } = await supabase.functions.invoke("run-research", { body: { projectId } });
@@ -39,7 +43,7 @@ const NewProject = () => {
         const niches = bulkNiches.map(n => n.trim()).filter(Boolean).slice(0, MAX_BULK);
         if (niches.length < 2) { toast.error("Enter at least 2 niches for bulk mode"); return; }
         const groupId = crypto.randomUUID();
-        const inserts = niches.map(n => ({ user_id: user!.id, niche: n, secondary_keywords: [], status: "pending", bulk_group_id: groupId }));
+        const inserts = niches.map(n => ({ user_id: user!.id, niche: n, secondary_keywords: [], status: "pending", bulk_group_id: groupId, target_duration_seconds: targetDuration, character_lock: characterLock }));
         const { data: created, error } = await supabase.from("projects").insert(inserts).select();
         if (error) throw error;
         const launched = await Promise.allSettled((created || []).map((p: any) => launchResearch(p.id)));
@@ -54,6 +58,7 @@ const NewProject = () => {
       const sec = secondary.map(s => s.trim()).filter(Boolean).slice(0, 2);
       const { data: project, error } = await supabase.from("projects").insert({
         user_id: user!.id, niche: niche.trim(), secondary_keywords: sec, status: "pending",
+        target_duration_seconds: targetDuration, character_lock: characterLock,
       }).select().single();
       if (error) throw error;
       await launchResearch(project.id);
