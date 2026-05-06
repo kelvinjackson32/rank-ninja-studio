@@ -74,34 +74,40 @@ export type Database = {
       projects: {
         Row: {
           bulk_group_id: string | null
+          character_lock: boolean
           created_at: string
           id: string
           niche: string
           progress_log: Json | null
           secondary_keywords: string[] | null
           status: string
+          target_duration_seconds: number
           updated_at: string
           user_id: string
         }
         Insert: {
           bulk_group_id?: string | null
+          character_lock?: boolean
           created_at?: string
           id?: string
           niche: string
           progress_log?: Json | null
           secondary_keywords?: string[] | null
           status?: string
+          target_duration_seconds?: number
           updated_at?: string
           user_id: string
         }
         Update: {
           bulk_group_id?: string | null
+          character_lock?: boolean
           created_at?: string
           id?: string
           niche?: string
           progress_log?: Json | null
           secondary_keywords?: string[] | null
           status?: string
+          target_duration_seconds?: number
           updated_at?: string
           user_id?: string
         }
