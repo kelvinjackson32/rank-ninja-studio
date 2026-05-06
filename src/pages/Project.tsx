@@ -900,6 +900,24 @@ function buildMarkdown(project: any, result: any): string {
       lines.push(`\n### ${n + 1}. ${tp.style}\n\n\`\`\`\n${tp.prompt}\n\`\`\``);
     });
   }
+  if (g.is_video_gig && Array.isArray(g.video_concepts) && g.video_concepts.length) {
+    lines.push(`\n## Demo Video Concepts (Fiverr requires a video upload for this gig)`);
+    g.video_concepts.forEach((c: any, n: number) => {
+      lines.push(`\n### Concept ${n + 1}: ${c.concept_title}${c.duration_seconds ? ` (${c.duration_seconds}s)` : ""}`);
+      if (c.concept_summary) lines.push(c.concept_summary);
+      if (c.visual_style) lines.push(`- Visual style: ${c.visual_style}`);
+      if (c.tools_suggested?.length) lines.push(`- Tools: ${c.tools_suggested.join(", ")}`);
+      const stages: [string, string][] = [
+        ["Stage 1 — 15 trending ideas", c.stage_prompts?.stage_1_ideas],
+        ["Stage 2 — Lyrics / script", c.stage_prompts?.stage_2_lyrics_or_script],
+        ["Stage 3 — Scene-by-scene script", c.stage_prompts?.stage_3_video_scene_script],
+        ["Stage 4 — Per-scene image prompts", c.stage_prompts?.stage_4_scene_image_prompts],
+        ["Stage 5 — Character lock-in prompts", c.stage_prompts?.stage_5_character_prompts],
+        ["Stage 6 — Google Flow / Veo video prompts", c.stage_prompts?.stage_6_final_scene_assembly],
+      ];
+      stages.forEach(([label, val]) => { if (val) lines.push(`\n**${label}:**\n\n\`\`\`\n${val}\n\`\`\``); });
+    });
+  }
   return lines.join("\n");
 }
 
