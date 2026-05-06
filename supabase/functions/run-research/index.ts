@@ -488,7 +488,7 @@ Generate the complete Fiverr profile and gig package in ONE valid JSON object wi
     "display_name": "...",
     "profile_title": "keyword-rich headline, max 70 chars",
     "short_bio": "MAX 150 characters",
-    "about": "Natural Fiverr About me section, 600-950 chars, real \n line breaks, no markdown",
+    "about": "Natural Fiverr About section, MAX 500 characters total, real \n line breaks, no markdown",
     "skills": ["max 15 skills"],
     "work_experience": [{"title":"...","company":"...","years":"..."}],
     "education": [{"degree":"...","institution":"...","year":"..."}],
