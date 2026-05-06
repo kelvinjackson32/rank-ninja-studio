@@ -988,6 +988,9 @@ function buildMarkdown(project: any, result: any): string {
       if (c.concept_summary) lines.push(c.concept_summary);
       if (c.visual_style) lines.push(`- Visual style: ${c.visual_style}`);
       if (c.tools_suggested?.length) lines.push(`- Tools: ${c.tools_suggested.join(", ")}`);
+      if (c.character_appearance_sheet) {
+        lines.push(`\n**Character Appearance Sheet (locked — reuse in every scene):**\n\n${c.character_appearance_sheet}\n`);
+      }
       const stages: [string, string][] = [
         ["Stage 1 — 15 trending ideas", c.stage_prompts?.stage_1_ideas],
         ["Stage 2 — Lyrics / script", c.stage_prompts?.stage_2_lyrics_or_script],
