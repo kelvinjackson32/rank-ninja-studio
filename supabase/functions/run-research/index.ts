@@ -549,6 +549,8 @@ REQUIREMENTS:
 - packages: every feature string MAX 100 characters (hard limit, Fiverr enforces this).
 - is_video_gig: set to true ONLY if the niche is a video deliverable that Fiverr requires a video upload for (AI video, UGC video, music video, kids music video, video editing, video ads, animation, faceless YouTube, motion graphics, explainer video, etc). Otherwise false.
 - video_concepts: if is_video_gig is true → return EXACTLY 2 distinct demo-video concepts aligned to the gig style. If false → return empty array [].
+- EVERY video_concept.duration_seconds MUST equal ${targetDuration}. Stage 3 timestamps and Stage 6 scene counts MUST add up to exactly ${targetDuration} seconds.
+- character_lock is ${characterLock ? "ON — fill character_appearance_sheet with a real markdown sheet (1-3 named characters with full appearance + outfit + HEX palette) and ensure stage_4/5/6 prompts EXPLICITLY tell the AI to reuse those exact character names, outfits, and art style line for EVERY scene." : "OFF — set character_appearance_sheet to empty string."}
 - Every stage_prompts.* must be a COMPLETE, copy-pasteable prompt the user can drop into Gemini/Grok/ChatGPT with no edits — write it in first person as if the user is asking the AI.
 - Everything must be specific to "${project.niche}" and grounded in the insights/top gigs.`,
       "You are a Fiverr top-seller strategist. Output only valid JSON. Generate premium but concise profile and gig assets that respect all Fiverr character limits.",
