@@ -625,6 +625,51 @@ const STAGE_META: { key: string; label: string; hint: string }[] = [
   { key: "stage_6_final_scene_assembly", label: "Stage 6 — Google Flow / Veo video prompts", hint: "Combine your characters into final 5s text-to-video prompts per scene." },
 ];
 
+function downloadBlob(filename: string, content: string, mime: string) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function stagePromptToPdf(filename: string, title: string, subtitle: string, body: string) {
+  const doc = new jsPDF({ unit: "pt", format: "a4" });
+  const margin = 48;
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const maxW = pageW - margin * 2;
+  let y = margin;
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(16);
+  doc.text(doc.splitTextToSize(title, maxW), margin, y);
+  y += 24;
+  if (subtitle) {
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    doc.setTextColor(110);
+    const sub = doc.splitTextToSize(subtitle, maxW);
+    doc.text(sub, margin, y);
+    y += sub.length * 12 + 8;
+    doc.setTextColor(0);
+  }
+
+  doc.setFont("courier", "normal");
+  doc.setFontSize(10);
+  const lines = doc.splitTextToSize(body, maxW);
+  for (const line of lines) {
+    if (y > pageH - margin) { doc.addPage(); y = margin; }
+    doc.text(line, margin, y);
+    y += 14;
+  }
+  doc.save(filename);
+}
+
+const slugify = (s: string) => (s || "concept").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 50);
+
 const VideoConceptsView = ({ gig, niche, copy }: any) => {
   const concepts = gig?.video_concepts || [];
   if (concepts.length === 0) {
@@ -642,51 +687,86 @@ const VideoConceptsView = ({ gig, niche, copy }: any) => {
           <h3 className="font-semibold text-sm uppercase tracking-wider font-mono text-primary">Demo video workflow for "{niche}"</h3>
         </div>
         <p className="text-sm text-muted-foreground">
-          Fiverr requires a demo video upload for this gig type. Follow the 6 stages below — each stage is a copy-paste prompt
-          you give to an AI assistant (Gemini / Grok / ChatGPT). Use Suno AI for music, Google Flow / Veo for video, and Canva to finish the cut.
+          Each stage below has its own <b>Copy</b>, <b>.md</b>, and <b>.pdf</b> export so you can hand a clean file to Gemini / Suno / Google Flow at every step.
         </p>
       </div>
 
-      {concepts.map((c: any, idx: number) => (
-        <div key={idx} className="surface-card rounded-lg p-5 space-y-4">
-          <div className="flex items-start justify-between gap-3 flex-wrap">
-            <div>
-              <div className="font-mono text-xs text-secondary uppercase tracking-wider">Concept #{idx + 1}{c.duration_seconds ? ` · ${c.duration_seconds}s` : ""}</div>
-              <div className="font-bold text-lg mt-1">{c.concept_title}</div>
-              {c.concept_summary && <p className="text-sm text-muted-foreground mt-1 max-w-2xl">{c.concept_summary}</p>}
-              {c.visual_style && <div className="text-xs mt-2"><span className="text-muted-foreground">Visual style: </span><span className="font-mono">{c.visual_style}</span></div>}
-            </div>
-            {Array.isArray(c.tools_suggested) && c.tools_suggested.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 max-w-xs justify-end">
-                {c.tools_suggested.map((t: string) => (
-                  <Badge key={t} variant="outline" className="text-[10px] font-mono">{t}</Badge>
-                ))}
+      {concepts.map((c: any, idx: number) => {
+        const conceptSlug = slugify(c.concept_title) || `concept-${idx + 1}`;
+        return (
+          <div key={idx} className="surface-card rounded-lg p-5 space-y-4">
+            <div className="flex items-start justify-between gap-3 flex-wrap">
+              <div>
+                <div className="font-mono text-xs text-secondary uppercase tracking-wider">Concept #{idx + 1}{c.duration_seconds ? ` · ${c.duration_seconds}s` : ""}</div>
+                <div className="font-bold text-lg mt-1">{c.concept_title}</div>
+                {c.concept_summary && <p className="text-sm text-muted-foreground mt-1 max-w-2xl">{c.concept_summary}</p>}
+                {c.visual_style && <div className="text-xs mt-2"><span className="text-muted-foreground">Visual style: </span><span className="font-mono">{c.visual_style}</span></div>}
               </div>
-            )}
-          </div>
+              {Array.isArray(c.tools_suggested) && c.tools_suggested.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 max-w-xs justify-end">
+                  {c.tools_suggested.map((t: string) => (
+                    <Badge key={t} variant="outline" className="text-[10px] font-mono">{t}</Badge>
+                  ))}
+                </div>
+              )}
+            </div>
 
-          <div className="space-y-3">
-            {STAGE_META.map((s, i) => {
-              const prompt = c.stage_prompts?.[s.key];
-              if (!prompt) return null;
-              return (
-                <div key={s.key} className="border border-border rounded-md p-3 bg-muted/10">
-                  <div className="flex items-start justify-between gap-2 mb-1">
+            {c.character_appearance_sheet && (
+              <div className="border border-primary/30 bg-primary/5 rounded-md p-4">
+                <div className="flex items-start justify-between gap-2 mb-2">
+                  <div className="flex items-center gap-2">
+                    <Users className="w-4 h-4 text-primary" />
                     <div>
-                      <div className="font-semibold text-sm">{s.label}</div>
-                      <div className="text-xs text-muted-foreground">{s.hint}</div>
+                      <div className="font-semibold text-sm">Character Appearance Sheet (locked)</div>
+                      <div className="text-xs text-muted-foreground">Every scene & video prompt below references these characters by name so they stay 100% consistent.</div>
                     </div>
-                    <Button size="sm" variant="outline" onClick={() => copy(prompt)}>
+                  </div>
+                  <div className="flex gap-1">
+                    <Button size="sm" variant="outline" onClick={() => copy(c.character_appearance_sheet)}>
                       <Copy className="w-3.5 h-3.5 mr-1" />Copy
                     </Button>
+                    <Button size="sm" variant="outline" onClick={() => downloadBlob(`${conceptSlug}-characters.md`, c.character_appearance_sheet, "text/markdown")}>
+                      <FileText className="w-3.5 h-3.5 mr-1" />.md
+                    </Button>
                   </div>
-                  <pre className="text-xs font-mono whitespace-pre-wrap bg-background/60 rounded-md p-3 mt-2 leading-relaxed">{prompt}</pre>
                 </div>
-              );
-            })}
+                <pre className="text-xs font-mono whitespace-pre-wrap bg-background/60 rounded-md p-3 leading-relaxed">{c.character_appearance_sheet}</pre>
+              </div>
+            )}
+
+            <div className="space-y-3">
+              {STAGE_META.map((s) => {
+                const prompt = c.stage_prompts?.[s.key];
+                if (!prompt) return null;
+                const fileBase = `${conceptSlug}-${s.key}`;
+                const subtitle = `${c.concept_title} · ${c.duration_seconds || ""}s · ${s.label}`;
+                return (
+                  <div key={s.key} className="border border-border rounded-md p-3 bg-muted/10">
+                    <div className="flex items-start justify-between gap-2 mb-1 flex-wrap">
+                      <div>
+                        <div className="font-semibold text-sm">{s.label}</div>
+                        <div className="text-xs text-muted-foreground">{s.hint}</div>
+                      </div>
+                      <div className="flex gap-1">
+                        <Button size="sm" variant="outline" onClick={() => copy(prompt)}>
+                          <Copy className="w-3.5 h-3.5 mr-1" />Copy
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => downloadBlob(`${fileBase}.md`, `# ${s.label}\n\n_${subtitle}_\n\n\`\`\`\n${prompt}\n\`\`\`\n`, "text/markdown")}>
+                          <FileText className="w-3.5 h-3.5 mr-1" />.md
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => stagePromptToPdf(`${fileBase}.pdf`, s.label, subtitle, prompt)}>
+                          <Download className="w-3.5 h-3.5 mr-1" />.pdf
+                        </Button>
+                      </div>
+                    </div>
+                    <pre className="text-xs font-mono whitespace-pre-wrap bg-background/60 rounded-md p-3 mt-2 leading-relaxed">{prompt}</pre>
+                  </div>
+                );
+              })}
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 };
