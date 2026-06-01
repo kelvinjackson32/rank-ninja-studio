@@ -140,37 +140,45 @@ async function scrapeWithFirecrawl(query: string): Promise<any[]> {
   return items;
 }
 
-async function callAI(prompt: string, system: string): Promise<string> {
-  const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-  if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY missing");
-  const resp = await fetchWithTimeout(
-    "https://ai.gateway.lovable.dev/v1/chat/completions",
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: prompt },
-        ],
-      }),
-    },
-    AI_TIMEOUT_MS,
-  );
-  if (resp.status === 429)
-    throw new Error("AI rate limit. Try again in a moment.");
-  if (resp.status === 402)
-    throw new Error(
-      "AI credits exhausted. Add credits in Settings → Workspace → Usage.",
-    );
-  if (!resp.ok)
-    throw new Error(`AI error ${resp.status}: ${await resp.text()}`);
+async function callAI(prompt: string, system: string, geminiKey: string, model = "gemini-2.5-flash"): Promise<string> {
+  if (!geminiKey) {
+    throw new Error("No Gemini API key configured. Open Settings → AI Generation and paste your Google Gemini API key (free at https://aistudio.google.com/apikey).");
+  }
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(geminiKey)}`;
+  const resp = await fetchWithTimeout(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: system }] },
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.8, maxOutputTokens: 8192 },
+    }),
+  }, AI_TIMEOUT_MS);
+  if (resp.status === 429) throw new Error("Gemini rate limit hit. Wait a moment and retry.");
+  if (resp.status === 401 || resp.status === 403) {
+    throw new Error("Gemini API key invalid or unauthorized. Update it in Settings → AI Generation.");
+  }
+  if (!resp.ok) {
+    const txt = await resp.text();
+    throw new Error(`Gemini error ${resp.status}: ${txt.slice(0, 300)}`);
+  }
   const data = await resp.json();
-  return data.choices?.[0]?.message?.content || "";
+  const text = data.candidates?.[0]?.content?.parts?.map((p: any) => p.text).filter(Boolean).join("\n") || "";
+  if (!text) throw new Error("Gemini returned an empty response.");
+  return text;
+}
+
+async function getUserGeminiKey(admin: any, userId: string): Promise<string> {
+  const { data } = await admin
+    .from("user_ai_settings")
+    .select("gemini_api_key")
+    .eq("user_id", userId)
+    .maybeSingle();
+  const key = (data?.gemini_api_key || "").trim();
+  if (!key) {
+    throw new Error("No Gemini API key configured. Open Settings → AI Generation and paste your Google Gemini API key (free at https://aistudio.google.com/apikey).");
+  }
+  return key;
 }
 
 function extractJson(text: string): any {
