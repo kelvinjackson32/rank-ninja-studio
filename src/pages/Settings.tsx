@@ -280,6 +280,7 @@ const Settings = () => {
             </div>
           )}
         </div>
+        </section>
       </div>
     </AppShell>
   );
