@@ -49,22 +49,28 @@ async function firecrawlScrape(url: string): Promise<{ markdown: string; metadat
   return null;
 }
 
-async function callAI(prompt: string, system: string): Promise<string> {
-  const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY")!;
-  const resp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+async function callAI(prompt: string, system: string, geminiKey: string): Promise<string> {
+  if (!geminiKey) {
+    throw new Error("No Gemini API key configured. Open Settings → AI Generation and paste your Google Gemini API key.");
+  }
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(geminiKey)}`;
+  const resp = await fetch(url, {
     method: "POST",
-    headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: "google/gemini-2.5-flash",
-      messages: [{ role: "system", content: system }, { role: "user", content: prompt }],
+      systemInstruction: { parts: [{ text: system }] },
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.8, maxOutputTokens: 8192 },
     }),
     signal: AbortSignal.timeout(90_000),
   });
-  if (resp.status === 429) throw new Error("AI rate limit reached — wait a minute and retry.");
-  if (resp.status === 402) throw new Error("AI credits exhausted. Top up Lovable AI in Settings → Workspace.");
-  if (!resp.ok) throw new Error(`AI ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
+  if (resp.status === 429) throw new Error("Gemini rate limit hit. Wait a moment and retry.");
+  if (resp.status === 401 || resp.status === 403) {
+    throw new Error("Gemini API key invalid or unauthorized. Update it in Settings → AI Generation.");
+  }
+  if (!resp.ok) throw new Error(`Gemini ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
   const data = await resp.json();
-  return data.choices?.[0]?.message?.content || "";
+  return data.candidates?.[0]?.content?.parts?.map((p: any) => p.text).filter(Boolean).join("\n") || "";
 }
 
 function safeParseJSON(raw: string): any {
