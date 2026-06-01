@@ -136,7 +136,7 @@ Rules:
 - 5–8 critical_issues, mix of severities, each with concrete fix.
 - 3–6 action_plan steps, ordered by impact, with realistic time estimates.`;
 
-  const raw = await callAI(prompt, system);
+  const raw = await callAI(prompt, system, opts.geminiKey);
   const parsed = safeParseJSON(raw);
   if (!parsed) {
     return {
