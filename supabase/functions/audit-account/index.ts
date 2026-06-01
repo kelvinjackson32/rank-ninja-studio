@@ -165,6 +165,20 @@ Deno.serve(async (req) => {
     const { data: { user } } = await userClient.auth.getUser();
     if (!user) return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
+    // Load the signed-in user's Gemini key — required for any AI generation.
+    const admin = createClient(SUPABASE_URL, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    const { data: settings } = await admin
+      .from("user_ai_settings")
+      .select("gemini_api_key")
+      .eq("user_id", user.id)
+      .maybeSingle();
+    const geminiKey = (settings?.gemini_api_key || "").trim();
+    if (!geminiKey) {
+      return new Response(JSON.stringify({
+        error: "No Gemini API key configured. Open Settings → AI Generation and paste your Google Gemini API key (free at https://aistudio.google.com/apikey).",
+      }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
     const body = await req.json();
     const profileUrl: string | undefined = body.profileUrl?.trim();
     const niche: string | undefined = body.niche?.trim();
@@ -190,12 +204,12 @@ Deno.serve(async (req) => {
 
     // Audit profile + gigs in parallel; even blocked URLs still get an AI audit.
     const profileAuditPromise = profileUrl
-      ? auditOne({ niche, issue, profile: { url: profileUrl, markdown: profileScrape?.markdown || null } })
+      ? auditOne({ niche, issue, profile: { url: profileUrl, markdown: profileScrape?.markdown || null }, geminiKey })
       : Promise.resolve(null);
 
     const gigAuditPromises = gigScrapes.map(async (g) => {
       try {
-        const audit = await auditOne({ niche, issue, gig: { url: g.url, markdown: g.r?.markdown || null } });
+        const audit = await auditOne({ niche, issue, gig: { url: g.url, markdown: g.r?.markdown || null }, geminiKey });
         const title = g.r?.metadata?.title || g.url.split("/").pop() || g.url;
         return { url: g.url, title, audit };
       } catch (e: any) {
