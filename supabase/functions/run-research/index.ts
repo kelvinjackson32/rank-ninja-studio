@@ -566,6 +566,7 @@ REQUIREMENTS:
 - Every stage_prompts.* must be a COMPLETE, copy-pasteable prompt the user can drop into Gemini/Grok/ChatGPT with no edits — write it in first person as if the user is asking the AI.
 - Everything must be specific to "${project.niche}" and grounded in the insights/top gigs.`,
       "You are a Fiverr top-seller strategist. Output only valid JSON. Generate premium but concise profile and gig assets that respect all Fiverr character limits.",
+      geminiKey,
     );
     const offer = extractJson(offerText);
     const profile_optimization = offer.profile_optimization || {};
