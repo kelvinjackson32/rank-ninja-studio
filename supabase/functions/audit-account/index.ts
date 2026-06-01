@@ -105,6 +105,7 @@ async function auditOne(opts: {
   niche?: string; issue?: string;
   profile?: { url: string; markdown: string | null };
   gig?: { url: string; markdown: string | null };
+  geminiKey: string;
 }) {
   const target = opts.gig ? "GIG" : "PROFILE";
   const url = opts.gig?.url || opts.profile?.url || "";
