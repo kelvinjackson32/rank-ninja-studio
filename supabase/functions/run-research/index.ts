@@ -271,6 +271,9 @@ Deno.serve(async (req) => {
 
 async function runResearchWork(admin: any, userId: string, projectId: string, project: any) {
 
+    // Require the user's Gemini key up front — fail fast with a clear message before scraping.
+    const geminiKey = await getUserGeminiKey(admin, userId);
+
     // Get user's keys ordered by status (active first), then last_used_at
     const { data: keys } = await admin
       .from("api_keys")
