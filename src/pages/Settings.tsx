@@ -25,11 +25,75 @@ const Settings = () => {
   const [apiKey, setApiKey] = useState("");
   const [actorId, setActorId] = useState("piotrv1001/fiverr-listings-scraper");
 
+  // AI Generation (Gemini) settings
+  const [geminiKey, setGeminiKey] = useState("");
+  const [geminiStatus, setGeminiStatus] = useState<GeminiStatus>("unknown");
+  const [geminiError, setGeminiError] = useState<string | null>(null);
+  const [savingGemini, setSavingGemini] = useState(false);
+
   const load = async () => {
     const { data } = await supabase.from("api_keys").select("*").order("created_at", { ascending: false });
     setKeys((data as Key[]) || []);
+    const { data: ai } = await supabase.from("user_ai_settings").select("gemini_api_key").maybeSingle();
+    if (ai?.gemini_api_key) {
+      setGeminiKey(ai.gemini_api_key);
+      setGeminiStatus("connected");
+    } else {
+      setGeminiKey("");
+      setGeminiStatus("unknown");
+    }
   };
   useEffect(() => { if (user) load(); }, [user]);
+
+  const saveGemini = async () => {
+    const trimmed = geminiKey.trim();
+    if (!trimmed) { toast.error("Paste your Gemini API key first"); return; }
+    setSavingGemini(true);
+    const { error } = await supabase
+      .from("user_ai_settings")
+      .upsert({ user_id: user!.id, gemini_api_key: trimmed }, { onConflict: "user_id" });
+    setSavingGemini(false);
+    if (error) { toast.error(error.message); return; }
+    toast.success("Gemini key saved");
+    setGeminiStatus("unknown");
+    setGeminiError(null);
+    // auto-test right after save
+    testGemini(trimmed);
+  };
+
+  const clearGemini = async () => {
+    const { error } = await supabase
+      .from("user_ai_settings")
+      .upsert({ user_id: user!.id, gemini_api_key: null }, { onConflict: "user_id" });
+    if (error) { toast.error(error.message); return; }
+    setGeminiKey("");
+    setGeminiStatus("unknown");
+    setGeminiError(null);
+    toast.success("Gemini key removed");
+  };
+
+  const testGemini = async (override?: string) => {
+    const candidate = (override ?? geminiKey).trim();
+    if (!candidate) { toast.error("Nothing to test — paste a key first"); return; }
+    setGeminiStatus("testing");
+    setGeminiError(null);
+    const { data, error } = await supabase.functions.invoke("test-gemini-key", {
+      body: { apiKey: candidate },
+    });
+    if (error) {
+      setGeminiStatus("invalid");
+      setGeminiError(error.message || "Test failed");
+      return;
+    }
+    if (data?.ok) {
+      setGeminiStatus("connected");
+      toast.success("Gemini key works!");
+    } else {
+      setGeminiStatus("invalid");
+      setGeminiError(data?.error || "Unknown error");
+    }
+  };
+
 
   const add = async () => {
     if (!name.trim() || !apiKey.trim()) { toast.error("Name and API key required"); return; }
