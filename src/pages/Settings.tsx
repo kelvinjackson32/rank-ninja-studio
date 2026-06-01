@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Plus, Trash2, KeyRound, CheckCircle2, AlertCircle, Pause, ClipboardPaste } from "lucide-react";
+import { Plus, Trash2, KeyRound, CheckCircle2, AlertCircle, Pause, ClipboardPaste, Sparkles, Loader2, ExternalLink } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { AppShell } from "@/components/AppShell";
@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 
 type Key = { id: string; name: string; api_key: string; actor_id: string | null; status: string; last_used_at: string | null; error_message: string | null };
+type GeminiStatus = "unknown" | "testing" | "connected" | "invalid";
 
 const Settings = () => {
   const { user } = useAuth();
