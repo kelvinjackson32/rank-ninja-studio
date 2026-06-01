@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Plus, Trash2, KeyRound, CheckCircle2, AlertCircle, Pause, ClipboardPaste } from "lucide-react";
+import { Plus, Trash2, KeyRound, CheckCircle2, AlertCircle, Pause, ClipboardPaste, Sparkles, Loader2, ExternalLink } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { AppShell } from "@/components/AppShell";
@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 
 type Key = { id: string; name: string; api_key: string; actor_id: string | null; status: string; last_used_at: string | null; error_message: string | null };
+type GeminiStatus = "unknown" | "testing" | "connected" | "invalid";
 
 const Settings = () => {
   const { user } = useAuth();
@@ -24,11 +25,75 @@ const Settings = () => {
   const [apiKey, setApiKey] = useState("");
   const [actorId, setActorId] = useState("piotrv1001/fiverr-listings-scraper");
 
+  // AI Generation (Gemini) settings
+  const [geminiKey, setGeminiKey] = useState("");
+  const [geminiStatus, setGeminiStatus] = useState<GeminiStatus>("unknown");
+  const [geminiError, setGeminiError] = useState<string | null>(null);
+  const [savingGemini, setSavingGemini] = useState(false);
+
   const load = async () => {
     const { data } = await supabase.from("api_keys").select("*").order("created_at", { ascending: false });
     setKeys((data as Key[]) || []);
+    const { data: ai } = await supabase.from("user_ai_settings").select("gemini_api_key").maybeSingle();
+    if (ai?.gemini_api_key) {
+      setGeminiKey(ai.gemini_api_key);
+      setGeminiStatus("connected");
+    } else {
+      setGeminiKey("");
+      setGeminiStatus("unknown");
+    }
   };
   useEffect(() => { if (user) load(); }, [user]);
+
+  const saveGemini = async () => {
+    const trimmed = geminiKey.trim();
+    if (!trimmed) { toast.error("Paste your Gemini API key first"); return; }
+    setSavingGemini(true);
+    const { error } = await supabase
+      .from("user_ai_settings")
+      .upsert({ user_id: user!.id, gemini_api_key: trimmed }, { onConflict: "user_id" });
+    setSavingGemini(false);
+    if (error) { toast.error(error.message); return; }
+    toast.success("Gemini key saved");
+    setGeminiStatus("unknown");
+    setGeminiError(null);
+    // auto-test right after save
+    testGemini(trimmed);
+  };
+
+  const clearGemini = async () => {
+    const { error } = await supabase
+      .from("user_ai_settings")
+      .upsert({ user_id: user!.id, gemini_api_key: null }, { onConflict: "user_id" });
+    if (error) { toast.error(error.message); return; }
+    setGeminiKey("");
+    setGeminiStatus("unknown");
+    setGeminiError(null);
+    toast.success("Gemini key removed");
+  };
+
+  const testGemini = async (override?: string) => {
+    const candidate = (override ?? geminiKey).trim();
+    if (!candidate) { toast.error("Nothing to test — paste a key first"); return; }
+    setGeminiStatus("testing");
+    setGeminiError(null);
+    const { data, error } = await supabase.functions.invoke("test-gemini-key", {
+      body: { apiKey: candidate },
+    });
+    if (error) {
+      setGeminiStatus("invalid");
+      setGeminiError(error.message || "Test failed");
+      return;
+    }
+    if (data?.ok) {
+      setGeminiStatus("connected");
+      toast.success("Gemini key works!");
+    } else {
+      setGeminiStatus("invalid");
+      setGeminiError(data?.error || "Unknown error");
+    }
+  };
+
 
   const add = async () => {
     if (!name.trim() || !apiKey.trim()) { toast.error("Name and API key required"); return; }
@@ -69,9 +134,75 @@ const Settings = () => {
     return <Badge className="bg-destructive/15 text-destructive border-destructive/30 hover:bg-destructive/20"><AlertCircle className="w-3 h-3 mr-1" />Error</Badge>;
   };
 
+  const geminiBadge = () => {
+    if (geminiStatus === "testing") return <Badge className="bg-muted text-muted-foreground border-border"><Loader2 className="w-3 h-3 mr-1 animate-spin" />Testing</Badge>;
+    if (geminiStatus === "connected") return <Badge className="bg-success/15 text-success border-success/30"><CheckCircle2 className="w-3 h-3 mr-1" />Connected</Badge>;
+    if (geminiStatus === "invalid") return <Badge className="bg-destructive/15 text-destructive border-destructive/30"><AlertCircle className="w-3 h-3 mr-1" />Invalid</Badge>;
+    return <Badge variant="outline">Not tested</Badge>;
+  };
+
   return (
     <AppShell>
-      <div className="p-8 max-w-5xl">
+      <div className="p-8 max-w-5xl space-y-10">
+        {/* === AI Generation Settings === */}
+        <section>
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <div className="font-mono text-xs text-primary uppercase tracking-widest mb-1 flex items-center gap-2">
+                <Sparkles className="w-3.5 h-3.5" /> AI Generation Settings
+              </div>
+              <h2 className="text-2xl font-bold tracking-tight">Google Gemini API Key</h2>
+              <p className="text-muted-foreground text-sm mt-1">
+                All AI text generation (profile, gig copy, FAQs, packages, insights) uses your own free Gemini key — no Lovable credits used. Scraping still uses Apify.
+              </p>
+            </div>
+            {geminiBadge()}
+          </div>
+
+          <div className="surface-card rounded-xl p-5 space-y-4">
+            <div>
+              <Label className="font-mono text-xs uppercase tracking-wider">Gemini API Key</Label>
+              <Input
+                type="password"
+                value={geminiKey}
+                onChange={(e) => { setGeminiKey(e.target.value); setGeminiStatus("unknown"); setGeminiError(null); }}
+                placeholder="AIza..."
+                className="mt-1.5 font-mono bg-input/50"
+              />
+              <p className="text-xs text-muted-foreground mt-1.5 flex items-center gap-1">
+                Get a free key at{" "}
+                <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" className="text-primary hover:underline inline-flex items-center gap-0.5">
+                  aistudio.google.com/apikey <ExternalLink className="w-3 h-3" />
+                </a>
+              </p>
+            </div>
+
+            {geminiError && (
+              <div className="text-xs text-destructive bg-destructive/10 border border-destructive/30 rounded-md p-2.5 font-mono">
+                {geminiError}
+              </div>
+            )}
+
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={saveGemini} disabled={savingGemini} className="bg-gradient-to-r from-primary to-secondary text-primary-foreground hover:opacity-90">
+                {savingGemini ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : null}
+                Save Key
+              </Button>
+              <Button variant="outline" onClick={() => testGemini()} disabled={geminiStatus === "testing" || !geminiKey.trim()}>
+                {geminiStatus === "testing" ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : null}
+                Test Connection
+              </Button>
+              {geminiKey && (
+                <Button variant="ghost" onClick={clearGemini} className="text-destructive hover:text-destructive hover:bg-destructive/10">
+                  <Trash2 className="w-4 h-4 mr-1" /> Remove
+                </Button>
+              )}
+            </div>
+          </div>
+        </section>
+
+        {/* === Apify (scraping) === */}
+        <section>
         <div className="flex items-center justify-between mb-8">
           <div>
             <div className="font-mono text-xs text-primary uppercase tracking-widest mb-1">// CREDENTIALS</div>
@@ -149,6 +280,7 @@ const Settings = () => {
             </div>
           )}
         </div>
+        </section>
       </div>
     </AppShell>
   );

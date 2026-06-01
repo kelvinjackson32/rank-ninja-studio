@@ -140,37 +140,45 @@ async function scrapeWithFirecrawl(query: string): Promise<any[]> {
   return items;
 }
 
-async function callAI(prompt: string, system: string): Promise<string> {
-  const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-  if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY missing");
-  const resp = await fetchWithTimeout(
-    "https://ai.gateway.lovable.dev/v1/chat/completions",
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: prompt },
-        ],
-      }),
-    },
-    AI_TIMEOUT_MS,
-  );
-  if (resp.status === 429)
-    throw new Error("AI rate limit. Try again in a moment.");
-  if (resp.status === 402)
-    throw new Error(
-      "AI credits exhausted. Add credits in Settings → Workspace → Usage.",
-    );
-  if (!resp.ok)
-    throw new Error(`AI error ${resp.status}: ${await resp.text()}`);
+async function callAI(prompt: string, system: string, geminiKey: string, model = "gemini-2.5-flash"): Promise<string> {
+  if (!geminiKey) {
+    throw new Error("No Gemini API key configured. Open Settings → AI Generation and paste your Google Gemini API key (free at https://aistudio.google.com/apikey).");
+  }
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(geminiKey)}`;
+  const resp = await fetchWithTimeout(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: system }] },
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.8, maxOutputTokens: 8192 },
+    }),
+  }, AI_TIMEOUT_MS);
+  if (resp.status === 429) throw new Error("Gemini rate limit hit. Wait a moment and retry.");
+  if (resp.status === 401 || resp.status === 403) {
+    throw new Error("Gemini API key invalid or unauthorized. Update it in Settings → AI Generation.");
+  }
+  if (!resp.ok) {
+    const txt = await resp.text();
+    throw new Error(`Gemini error ${resp.status}: ${txt.slice(0, 300)}`);
+  }
   const data = await resp.json();
-  return data.choices?.[0]?.message?.content || "";
+  const text = data.candidates?.[0]?.content?.parts?.map((p: any) => p.text).filter(Boolean).join("\n") || "";
+  if (!text) throw new Error("Gemini returned an empty response.");
+  return text;
+}
+
+async function getUserGeminiKey(admin: any, userId: string): Promise<string> {
+  const { data } = await admin
+    .from("user_ai_settings")
+    .select("gemini_api_key")
+    .eq("user_id", userId)
+    .maybeSingle();
+  const key = (data?.gemini_api_key || "").trim();
+  if (!key) {
+    throw new Error("No Gemini API key configured. Open Settings → AI Generation and paste your Google Gemini API key (free at https://aistudio.google.com/apikey).");
+  }
+  return key;
 }
 
 function extractJson(text: string): any {
@@ -262,6 +270,9 @@ Deno.serve(async (req) => {
 });
 
 async function runResearchWork(admin: any, userId: string, projectId: string, project: any) {
+
+    // Require the user's Gemini key up front — fail fast with a clear message before scraping.
+    const geminiKey = await getUserGeminiKey(admin, userId);
 
     // Get user's keys ordered by status (active first), then last_used_at
     const { data: keys } = await admin
@@ -454,6 +465,7 @@ For "top_sellers": pick the 5 BEST performers, prioritizing: Fiverr's Choice →
 For "opportunity_score": be brutally honest. Saturated low-demand = 20-40. Saturated high-demand = 50-65. Healthy demand with differentiation room = 70-90.
 For "niche_angles": return EXACTLY 3 distinct angles. Each must be a REFINEMENT/COMBINATION of the broad niche the user submitted, NOT a generic restatement. Pick angles that have proven demand in the scraped data (visible orders/reviews/queues) BUT are not dominated by Top Rated / Pro / Fiverr's Choice — i.e. realistic for a brand-new seller to break into. Avoid suggesting the most saturated head terms even if they have demand. Use the variation seed so this run produces different angles than previous runs would.`,
       "You are an expert Fiverr SEO analyst. Output only valid JSON, no prose. Be specific and reference real data. When the input contains gig_url/seller_url, copy them verbatim into top_sellers — do not invent or guess URLs. Each Re-run must use the variation seed to surface DIFFERENT niche_angles than prior runs.",
+      geminiKey,
     );
     const insights = extractJson(insightsText);
 
@@ -554,6 +566,7 @@ REQUIREMENTS:
 - Every stage_prompts.* must be a COMPLETE, copy-pasteable prompt the user can drop into Gemini/Grok/ChatGPT with no edits — write it in first person as if the user is asking the AI.
 - Everything must be specific to "${project.niche}" and grounded in the insights/top gigs.`,
       "You are a Fiverr top-seller strategist. Output only valid JSON. Generate premium but concise profile and gig assets that respect all Fiverr character limits.",
+      geminiKey,
     );
     const offer = extractJson(offerText);
     const profile_optimization = offer.profile_optimization || {};

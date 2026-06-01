@@ -49,22 +49,28 @@ async function firecrawlScrape(url: string): Promise<{ markdown: string; metadat
   return null;
 }
 
-async function callAI(prompt: string, system: string): Promise<string> {
-  const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY")!;
-  const resp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+async function callAI(prompt: string, system: string, geminiKey: string): Promise<string> {
+  if (!geminiKey) {
+    throw new Error("No Gemini API key configured. Open Settings → AI Generation and paste your Google Gemini API key.");
+  }
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(geminiKey)}`;
+  const resp = await fetch(url, {
     method: "POST",
-    headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: "google/gemini-2.5-flash",
-      messages: [{ role: "system", content: system }, { role: "user", content: prompt }],
+      systemInstruction: { parts: [{ text: system }] },
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.8, maxOutputTokens: 8192 },
     }),
     signal: AbortSignal.timeout(90_000),
   });
-  if (resp.status === 429) throw new Error("AI rate limit reached — wait a minute and retry.");
-  if (resp.status === 402) throw new Error("AI credits exhausted. Top up Lovable AI in Settings → Workspace.");
-  if (!resp.ok) throw new Error(`AI ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
+  if (resp.status === 429) throw new Error("Gemini rate limit hit. Wait a moment and retry.");
+  if (resp.status === 401 || resp.status === 403) {
+    throw new Error("Gemini API key invalid or unauthorized. Update it in Settings → AI Generation.");
+  }
+  if (!resp.ok) throw new Error(`Gemini ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
   const data = await resp.json();
-  return data.choices?.[0]?.message?.content || "";
+  return data.candidates?.[0]?.content?.parts?.map((p: any) => p.text).filter(Boolean).join("\n") || "";
 }
 
 function safeParseJSON(raw: string): any {
@@ -99,6 +105,7 @@ async function auditOne(opts: {
   niche?: string; issue?: string;
   profile?: { url: string; markdown: string | null };
   gig?: { url: string; markdown: string | null };
+  geminiKey: string;
 }) {
   const target = opts.gig ? "GIG" : "PROFILE";
   const url = opts.gig?.url || opts.profile?.url || "";
@@ -129,7 +136,7 @@ Rules:
 - 5–8 critical_issues, mix of severities, each with concrete fix.
 - 3–6 action_plan steps, ordered by impact, with realistic time estimates.`;
 
-  const raw = await callAI(prompt, system);
+  const raw = await callAI(prompt, system, opts.geminiKey);
   const parsed = safeParseJSON(raw);
   if (!parsed) {
     return {
@@ -158,6 +165,20 @@ Deno.serve(async (req) => {
     const { data: { user } } = await userClient.auth.getUser();
     if (!user) return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
+    // Load the signed-in user's Gemini key — required for any AI generation.
+    const admin = createClient(SUPABASE_URL, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    const { data: settings } = await admin
+      .from("user_ai_settings")
+      .select("gemini_api_key")
+      .eq("user_id", user.id)
+      .maybeSingle();
+    const geminiKey = (settings?.gemini_api_key || "").trim();
+    if (!geminiKey) {
+      return new Response(JSON.stringify({
+        error: "No Gemini API key configured. Open Settings → AI Generation and paste your Google Gemini API key (free at https://aistudio.google.com/apikey).",
+      }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
     const body = await req.json();
     const profileUrl: string | undefined = body.profileUrl?.trim();
     const niche: string | undefined = body.niche?.trim();
@@ -183,12 +204,12 @@ Deno.serve(async (req) => {
 
     // Audit profile + gigs in parallel; even blocked URLs still get an AI audit.
     const profileAuditPromise = profileUrl
-      ? auditOne({ niche, issue, profile: { url: profileUrl, markdown: profileScrape?.markdown || null } })
+      ? auditOne({ niche, issue, profile: { url: profileUrl, markdown: profileScrape?.markdown || null }, geminiKey })
       : Promise.resolve(null);
 
     const gigAuditPromises = gigScrapes.map(async (g) => {
       try {
-        const audit = await auditOne({ niche, issue, gig: { url: g.url, markdown: g.r?.markdown || null } });
+        const audit = await auditOne({ niche, issue, gig: { url: g.url, markdown: g.r?.markdown || null }, geminiKey });
         const title = g.r?.metadata?.title || g.url.split("/").pop() || g.url;
         return { url: g.url, title, audit };
       } catch (e: any) {

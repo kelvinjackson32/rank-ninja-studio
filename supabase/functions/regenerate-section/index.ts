@@ -17,6 +17,19 @@ Deno.serve(async (req) => {
     const { data: { user } } = await userClient.auth.getUser();
     if (!user) return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
+    // Load user's Gemini key.
+    const { data: settings } = await admin
+      .from("user_ai_settings")
+      .select("gemini_api_key")
+      .eq("user_id", user.id)
+      .maybeSingle();
+    const geminiKey = (settings?.gemini_api_key || "").trim();
+    if (!geminiKey) {
+      return new Response(JSON.stringify({
+        error: "No Gemini API key configured. Open Settings → AI Generation and paste your Google Gemini API key.",
+      }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
     const { resultId, section, field, instruction } = await req.json();
 
     const { data: result } = await admin.from("research_results").select("*").eq("id", resultId).eq("user_id", user.id).single();
@@ -24,23 +37,26 @@ Deno.serve(async (req) => {
 
     const context = JSON.stringify({ insights: result.insights, current: section === "profile" ? result.profile_optimization : result.gig_optimization }).slice(0, 12000);
 
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY")!;
-    const resp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const system = "You are a Fiverr expert. Return ONLY raw text/JSON for the requested field, no markdown, no commentary.";
+    const prompt = `Context:\n${context}\n\nRegenerate the "${field}" field of the ${section} section. Custom instruction: ${instruction || "Improve quality"}. Return only the new value (string for text fields, JSON array/object for structured fields).`;
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(geminiKey)}`;
+    const resp = await fetch(url, {
       method: "POST",
-      headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
-        messages: [
-          { role: "system", content: "You are a Fiverr expert. Return ONLY raw text/JSON for the requested field, no markdown, no commentary." },
-          { role: "user", content: `Context:\n${context}\n\nRegenerate the "${field}" field of the ${section} section. Custom instruction: ${instruction || "Improve quality"}. Return only the new value (string for text fields, JSON array/object for structured fields).` },
-        ],
+        systemInstruction: { parts: [{ text: system }] },
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.8, maxOutputTokens: 4096 },
       }),
+      signal: AbortSignal.timeout(60_000),
     });
-    if (resp.status === 429) throw new Error("AI rate limit");
-    if (resp.status === 402) throw new Error("AI credits exhausted");
-    if (!resp.ok) throw new Error(`AI ${resp.status}`);
+    if (resp.status === 429) throw new Error("Gemini rate limit hit. Try again in a moment.");
+    if (resp.status === 401 || resp.status === 403) throw new Error("Gemini API key invalid or unauthorized. Update it in Settings → AI Generation.");
+    if (!resp.ok) throw new Error(`Gemini ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
+
     const data = await resp.json();
-    let value: any = data.choices?.[0]?.message?.content || "";
+    let value: any = data.candidates?.[0]?.content?.parts?.map((p: any) => p.text).filter(Boolean).join("\n") || "";
     value = value.replace(/^```(?:json)?\s*|\s*```$/g, "").trim();
     try { value = JSON.parse(value); } catch {}
 
