@@ -477,7 +477,7 @@ async function runResearchWork(admin: any, userId: string, projectId: string, pr
     // Variation seed so each Re-run produces fresh niche angles + edited titles/sellers/etc.
     const variationSeed = Math.floor(Math.random() * 1_000_000);
 
-    const insightsText = await callAI(
+    const insights = await generateJson(
       `Analyze these REAL Fiverr gigs scraped for niche "${project.niche}":\n${dataBlob}\n\nVariation seed (use to ensure this run produces DIFFERENT niche_angles than any previous run): ${variationSeed}\n\nReturn JSON with these EXACT keys (no extras):
 {
   "competition_level": "low|medium|high|saturated",
@@ -524,8 +524,8 @@ For "opportunity_score": be brutally honest. Saturated low-demand = 20-40. Satur
 For "niche_angles": return EXACTLY 3 distinct angles. Each must be a REFINEMENT/COMBINATION of the broad niche the user submitted, NOT a generic restatement. Pick angles that have proven demand in the scraped data (visible orders/reviews/queues) BUT are not dominated by Top Rated / Pro / Fiverr's Choice — i.e. realistic for a brand-new seller to break into. Avoid suggesting the most saturated head terms even if they have demand. Use the variation seed so this run produces different angles than previous runs would.`,
       "You are an expert Fiverr SEO analyst. Output only valid JSON, no prose. Be specific and reference real data. When the input contains gig_url/seller_url, copy them verbatim into top_sellers — do not invent or guess URLs. Each Re-run must use the variation seed to surface DIFFERENT niche_angles than prior runs.",
       geminiKey,
+      "insights",
     );
-    const insights = extractJson(insightsText);
 
     // Backfill / verify source URLs from real scraped data
     if (Array.isArray(insights?.top_sellers)) {
@@ -547,7 +547,7 @@ For "niche_angles": return EXACTLY 3 distinct angles. Each must be a REFINEMENT/
     await appendLog(admin, projectId, `✏️ Generating profile, gig package, requirements, and thumbnails...`);
     const targetDuration = Number(project.target_duration_seconds) || 30;
     const characterLock = project.character_lock !== false;
-    const offerText = await callAI(
+    const offer = await generateJson(
       `Based on this Fiverr competitor research for "${project.niche}":
 Insights: ${JSON.stringify(insights)}
 Top gigs sample: ${dataBlob.slice(0, 9000)}
@@ -625,8 +625,8 @@ REQUIREMENTS:
 - Everything must be specific to "${project.niche}" and grounded in the insights/top gigs.`,
       "You are a Fiverr top-seller strategist. Output only valid JSON. Generate premium but concise profile and gig assets that respect all Fiverr character limits.",
       geminiKey,
+      "profile and gig package",
     );
-    const offer = extractJson(offerText);
     const profile_optimization = offer.profile_optimization || {};
     const gig_optimization = offer.gig_optimization || {};
     if (typeof profile_optimization.short_bio === "string" && profile_optimization.short_bio.length > 150) {
