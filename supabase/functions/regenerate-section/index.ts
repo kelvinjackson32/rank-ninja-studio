@@ -87,7 +87,7 @@ Deno.serve(async (req) => {
     const { data: project } = await admin.from("projects").select("niche, target_duration_seconds, character_lock").eq("id", (result as any).project_id).maybeSingle();
     const targetDuration = project?.target_duration_seconds || 30;
     const characterLock = project?.character_lock !== false;
-    const niche = project.niche || "";
+    const niche = project?.niche || "";
 
     // ========== CASCADE BRANCH: regenerating gig_title rebuilds every dependent field ==========
     if (section === "gig" && field === "gig_title") {
