@@ -9,7 +9,7 @@ const corsHeaders = {
 const APIFY_BASE = "https://api.apify.com/v2";
 const APIFY_SYNC_TIMEOUT_SECONDS = 55;
 const FETCH_TIMEOUT_MS = 65_000;
-const AI_TIMEOUT_MS = 70_000;
+const AI_TIMEOUT_MS = 110_000;
 const MAX_KEYS_PER_QUERY = 2;
 const MAX_SECONDARY_KEYWORDS = 1;
 
@@ -140,7 +140,13 @@ async function scrapeWithFirecrawl(query: string): Promise<any[]> {
   return items;
 }
 
-async function callAI(prompt: string, system: string, geminiKey: string, model = "gemini-2.5-flash"): Promise<string> {
+async function callAI(
+  prompt: string,
+  system: string,
+  geminiKey: string,
+  model = "gemini-2.5-flash",
+  opts: { json?: boolean; temperature?: number; maxOutputTokens?: number } = {},
+): Promise<string> {
   if (!geminiKey) {
     throw new Error("No Gemini API key configured. Open Settings → AI Generation and paste your Google Gemini API key (free at https://aistudio.google.com/apikey).");
   }
@@ -151,7 +157,11 @@ async function callAI(prompt: string, system: string, geminiKey: string, model =
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: system }] },
       contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.8, maxOutputTokens: 8192 },
+        generationConfig: {
+          temperature: opts.temperature ?? 0.65,
+          maxOutputTokens: opts.maxOutputTokens ?? 16384,
+          ...(opts.json ? { responseMimeType: "application/json" } : {}),
+        },
     }),
   }, AI_TIMEOUT_MS);
   if (resp.status === 429) throw new Error("Gemini rate limit hit. Wait a moment and retry.");
@@ -163,8 +173,9 @@ async function callAI(prompt: string, system: string, geminiKey: string, model =
     throw new Error(`Gemini error ${resp.status}: ${txt.slice(0, 300)}`);
   }
   const data = await resp.json();
-  const text = data.candidates?.[0]?.content?.parts?.map((p: any) => p.text).filter(Boolean).join("\n") || "";
-  if (!text) throw new Error("Gemini returned an empty response.");
+  const candidate = data.candidates?.[0];
+  const text = candidate?.content?.parts?.map((p: any) => p.text).filter(Boolean).join("\n") || "";
+  if (!text) throw new Error(`Gemini returned an empty response${candidate?.finishReason ? ` (${candidate.finishReason})` : ""}.`);
   return text;
 }
 
@@ -181,13 +192,60 @@ async function getUserGeminiKey(admin: any, userId: string): Promise<string> {
   return key;
 }
 
+function findBalancedJson(raw: string): string | null {
+  const start = raw.search(/[\[{]/);
+  if (start === -1) return null;
+  const opener = raw[start];
+  const closer = opener === "{" ? "}" : "]";
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < raw.length; i++) {
+    const ch = raw[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === opener) depth++;
+    else if (ch === closer) {
+      depth--;
+      if (depth === 0) return raw.slice(start, i + 1);
+    }
+  }
+  return null;
+}
+
 function extractJson(text: string): any {
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-  const raw = fenced ? fenced[1] : text;
-  const start = raw.indexOf("{");
-  const end = raw.lastIndexOf("}");
-  if (start === -1 || end === -1) throw new Error("No JSON in AI response");
-  return JSON.parse(raw.slice(start, end + 1));
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const raw = (fenced ? fenced[1] : text).trim();
+  try {
+    return JSON.parse(raw);
+  } catch {
+    const json = findBalancedJson(raw);
+    if (!json) throw new Error(`No JSON in AI response. Gemini said: ${raw.slice(0, 220) || "empty response"}`);
+    return JSON.parse(json);
+  }
+}
+
+async function generateJson(prompt: string, system: string, geminiKey: string, label: string): Promise<any> {
+  const jsonSystem = `${system}\nReturn one valid JSON object only. Do not include markdown, comments, explanations, or text outside JSON.`;
+  let raw = await callAI(prompt, jsonSystem, geminiKey, "gemini-2.5-flash", { json: true });
+  try {
+    return extractJson(raw);
+  } catch (firstError: any) {
+    console.warn(`${label} JSON parse failed; retrying with stricter prompt:`, firstError?.message || firstError);
+    raw = await callAI(
+      `Your last response was not valid JSON. Regenerate the answer from scratch as ONE complete valid JSON object only. No markdown fences, no intro, no notes.\n\nOriginal task:\n${prompt}`,
+      jsonSystem,
+      geminiKey,
+      "gemini-2.5-flash",
+      { json: true, temperature: 0.25, maxOutputTokens: 20000 },
+    );
+    return extractJson(raw);
+  }
 }
 
 Deno.serve(async (req) => {
