@@ -82,12 +82,11 @@ Deno.serve(async (req) => {
 
     const { resultId, section, field, instruction } = await req.json();
 
-    const { data: result } = await admin.from("research_results").select("*, projects!inner(niche, target_duration_seconds, character_lock)").eq("id", resultId).eq("user_id", user.id).single();
+    const { data: result } = await admin.from("research_results").select("*").eq("id", resultId).eq("user_id", user.id).single();
     if (!result) throw new Error("Result not found");
-
-    const project = (result as any).projects || {};
-    const targetDuration = project.target_duration_seconds || 30;
-    const characterLock = project.character_lock !== false;
+    const { data: project } = await admin.from("projects").select("niche, target_duration_seconds, character_lock").eq("id", (result as any).project_id).maybeSingle();
+    const targetDuration = project?.target_duration_seconds || 30;
+    const characterLock = project?.character_lock !== false;
     const niche = project.niche || "";
 
     // ========== CASCADE BRANCH: regenerating gig_title rebuilds every dependent field ==========
