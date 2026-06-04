@@ -9,7 +9,7 @@ const corsHeaders = {
 const APIFY_BASE = "https://api.apify.com/v2";
 const APIFY_SYNC_TIMEOUT_SECONDS = 55;
 const FETCH_TIMEOUT_MS = 65_000;
-const AI_TIMEOUT_MS = 70_000;
+const AI_TIMEOUT_MS = 110_000;
 const MAX_KEYS_PER_QUERY = 2;
 const MAX_SECONDARY_KEYWORDS = 1;
 
@@ -140,7 +140,13 @@ async function scrapeWithFirecrawl(query: string): Promise<any[]> {
   return items;
 }
 
-async function callAI(prompt: string, system: string, geminiKey: string, model = "gemini-2.5-flash"): Promise<string> {
+async function callAI(
+  prompt: string,
+  system: string,
+  geminiKey: string,
+  model = "gemini-2.5-flash",
+  opts: { json?: boolean; temperature?: number; maxOutputTokens?: number } = {},
+): Promise<string> {
   if (!geminiKey) {
     throw new Error("No Gemini API key configured. Open Settings → AI Generation and paste your Google Gemini API key (free at https://aistudio.google.com/apikey).");
   }
@@ -151,7 +157,11 @@ async function callAI(prompt: string, system: string, geminiKey: string, model =
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: system }] },
       contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.8, maxOutputTokens: 8192 },
+        generationConfig: {
+          temperature: opts.temperature ?? 0.65,
+          maxOutputTokens: opts.maxOutputTokens ?? 16384,
+          ...(opts.json ? { responseMimeType: "application/json" } : {}),
+        },
     }),
   }, AI_TIMEOUT_MS);
   if (resp.status === 429) throw new Error("Gemini rate limit hit. Wait a moment and retry.");
@@ -163,8 +173,9 @@ async function callAI(prompt: string, system: string, geminiKey: string, model =
     throw new Error(`Gemini error ${resp.status}: ${txt.slice(0, 300)}`);
   }
   const data = await resp.json();
-  const text = data.candidates?.[0]?.content?.parts?.map((p: any) => p.text).filter(Boolean).join("\n") || "";
-  if (!text) throw new Error("Gemini returned an empty response.");
+  const candidate = data.candidates?.[0];
+  const text = candidate?.content?.parts?.map((p: any) => p.text).filter(Boolean).join("\n") || "";
+  if (!text) throw new Error(`Gemini returned an empty response${candidate?.finishReason ? ` (${candidate.finishReason})` : ""}.`);
   return text;
 }
 
@@ -181,13 +192,60 @@ async function getUserGeminiKey(admin: any, userId: string): Promise<string> {
   return key;
 }
 
+function findBalancedJson(raw: string): string | null {
+  const start = raw.search(/[\[{]/);
+  if (start === -1) return null;
+  const opener = raw[start];
+  const closer = opener === "{" ? "}" : "]";
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < raw.length; i++) {
+    const ch = raw[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === opener) depth++;
+    else if (ch === closer) {
+      depth--;
+      if (depth === 0) return raw.slice(start, i + 1);
+    }
+  }
+  return null;
+}
+
 function extractJson(text: string): any {
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-  const raw = fenced ? fenced[1] : text;
-  const start = raw.indexOf("{");
-  const end = raw.lastIndexOf("}");
-  if (start === -1 || end === -1) throw new Error("No JSON in AI response");
-  return JSON.parse(raw.slice(start, end + 1));
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const raw = (fenced ? fenced[1] : text).trim();
+  try {
+    return JSON.parse(raw);
+  } catch {
+    const json = findBalancedJson(raw);
+    if (!json) throw new Error(`No JSON in AI response. Gemini said: ${raw.slice(0, 220) || "empty response"}`);
+    return JSON.parse(json);
+  }
+}
+
+async function generateJson(prompt: string, system: string, geminiKey: string, label: string): Promise<any> {
+  const jsonSystem = `${system}\nReturn one valid JSON object only. Do not include markdown, comments, explanations, or text outside JSON.`;
+  let raw = await callAI(prompt, jsonSystem, geminiKey, "gemini-2.5-flash", { json: true });
+  try {
+    return extractJson(raw);
+  } catch (firstError: any) {
+    console.warn(`${label} JSON parse failed; retrying with stricter prompt:`, firstError?.message || firstError);
+    raw = await callAI(
+      `Your last response was not valid JSON. Regenerate the answer from scratch as ONE complete valid JSON object only. No markdown fences, no intro, no notes.\n\nOriginal task:\n${prompt}`,
+      jsonSystem,
+      geminiKey,
+      "gemini-2.5-flash",
+      { json: true, temperature: 0.25, maxOutputTokens: 20000 },
+    );
+    return extractJson(raw);
+  }
 }
 
 Deno.serve(async (req) => {
@@ -419,7 +477,7 @@ async function runResearchWork(admin: any, userId: string, projectId: string, pr
     // Variation seed so each Re-run produces fresh niche angles + edited titles/sellers/etc.
     const variationSeed = Math.floor(Math.random() * 1_000_000);
 
-    const insightsText = await callAI(
+    const insights = await generateJson(
       `Analyze these REAL Fiverr gigs scraped for niche "${project.niche}":\n${dataBlob}\n\nVariation seed (use to ensure this run produces DIFFERENT niche_angles than any previous run): ${variationSeed}\n\nReturn JSON with these EXACT keys (no extras):
 {
   "competition_level": "low|medium|high|saturated",
@@ -466,8 +524,8 @@ For "opportunity_score": be brutally honest. Saturated low-demand = 20-40. Satur
 For "niche_angles": return EXACTLY 3 distinct angles. Each must be a REFINEMENT/COMBINATION of the broad niche the user submitted, NOT a generic restatement. Pick angles that have proven demand in the scraped data (visible orders/reviews/queues) BUT are not dominated by Top Rated / Pro / Fiverr's Choice — i.e. realistic for a brand-new seller to break into. Avoid suggesting the most saturated head terms even if they have demand. Use the variation seed so this run produces different angles than previous runs would.`,
       "You are an expert Fiverr SEO analyst. Output only valid JSON, no prose. Be specific and reference real data. When the input contains gig_url/seller_url, copy them verbatim into top_sellers — do not invent or guess URLs. Each Re-run must use the variation seed to surface DIFFERENT niche_angles than prior runs.",
       geminiKey,
+      "insights",
     );
-    const insights = extractJson(insightsText);
 
     // Backfill / verify source URLs from real scraped data
     if (Array.isArray(insights?.top_sellers)) {
@@ -489,7 +547,7 @@ For "niche_angles": return EXACTLY 3 distinct angles. Each must be a REFINEMENT/
     await appendLog(admin, projectId, `✏️ Generating profile, gig package, requirements, and thumbnails...`);
     const targetDuration = Number(project.target_duration_seconds) || 30;
     const characterLock = project.character_lock !== false;
-    const offerText = await callAI(
+    const offer = await generateJson(
       `Based on this Fiverr competitor research for "${project.niche}":
 Insights: ${JSON.stringify(insights)}
 Top gigs sample: ${dataBlob.slice(0, 9000)}
@@ -567,8 +625,8 @@ REQUIREMENTS:
 - Everything must be specific to "${project.niche}" and grounded in the insights/top gigs.`,
       "You are a Fiverr top-seller strategist. Output only valid JSON. Generate premium but concise profile and gig assets that respect all Fiverr character limits.",
       geminiKey,
+      "profile and gig package",
     );
-    const offer = extractJson(offerText);
     const profile_optimization = offer.profile_optimization || {};
     const gig_optimization = offer.gig_optimization || {};
     if (typeof profile_optimization.short_bio === "string" && profile_optimization.short_bio.length > 150) {
