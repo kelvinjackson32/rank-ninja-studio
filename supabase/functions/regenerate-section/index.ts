@@ -139,7 +139,9 @@ HARD RULES:
         newGig.gig_title = newGig.gig_title.slice(0, 80);
       }
 
-      const merged = { ...currentGig, ...newGig };
+      const { applySafetyFilter } = await import("../_shared/safety.ts");
+      const safe = applySafetyFilter(newGig, "gig");
+      const merged = { ...currentGig, ...safe.sanitized, safety_report: safe.report };
       await admin.from("research_results").update({ gig_optimization: merged }).eq("id", resultId);
 
       return new Response(JSON.stringify({ success: true, cascade: true, gig_optimization: merged }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -159,11 +161,24 @@ HARD RULES:
     try { value = JSON.parse(value); } catch {}
     if (field === "packages") value = capPackages(value);
 
+    const { applySafetyFilter } = await import("../_shared/safety.ts");
+    const fieldSafe = applySafetyFilter({ [field]: value }, section);
+    value = (fieldSafe.sanitized as any)[field];
+
     const key = section === "profile" ? "profile_optimization" : "gig_optimization";
-    const updated = { ...(result as any)[key], [field]: value };
+    const existing = (result as any)[key] || {};
+    const existingReport = existing.safety_report || { applied_at: new Date().toISOString(), total_fixes: 0, flags: [], notes: [] };
+    const mergedReport = {
+      applied_at: new Date().toISOString(),
+      total_fixes: (existingReport.total_fixes || 0) + fieldSafe.report.total_fixes,
+      flags: [...(existingReport.flags || []).filter((f: any) => !f.field?.startsWith(field)), ...fieldSafe.report.flags],
+      notes: Array.from(new Set([...(existingReport.notes || []), ...fieldSafe.report.notes])),
+    };
+    const updated = { ...existing, [field]: value, safety_report: mergedReport };
     await admin.from("research_results").update({ [key]: updated }).eq("id", resultId);
 
-    return new Response(JSON.stringify({ success: true, value }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ success: true, value, safety_report: fieldSafe.report }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+
   } catch (e: any) {
     return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
