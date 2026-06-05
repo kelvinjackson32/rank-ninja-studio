@@ -11,6 +11,8 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "sonner";
+import { SafetyReportPanel } from "@/components/SafetyReportPanel";
+
 
 // Fiverr platform limits used for warnings
 const LIMITS: Record<string, number> = {
