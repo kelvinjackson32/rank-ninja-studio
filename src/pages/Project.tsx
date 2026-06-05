@@ -11,6 +11,8 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "sonner";
+import { SafetyReportPanel } from "@/components/SafetyReportPanel";
+
 
 // Fiverr platform limits used for warnings
 const LIMITS: Record<string, number> = {
@@ -177,7 +179,17 @@ const Project = () => {
         )}
 
         {result && (
+          <div className="mb-4">
+            <SafetyReportPanel
+              profile={result.profile_optimization?.safety_report}
+              gig={result.gig_optimization?.safety_report}
+            />
+          </div>
+        )}
+
+        {result && (
           <Tabs defaultValue="insights">
+
             <TabsList className="bg-muted/40 border border-border flex-wrap h-auto">
               <TabsTrigger value="insights"><Sparkles className="w-4 h-4 mr-1" />Insights</TabsTrigger>
               <TabsTrigger value="sellers"><Trophy className="w-4 h-4 mr-1" />Top Sellers</TabsTrigger>
