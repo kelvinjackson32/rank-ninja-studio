@@ -656,14 +656,22 @@ REQUIREMENTS:
       gig_optimization.thumbnail_prompts = gig_optimization.thumbnail_prompts.slice(0, 2);
     }
 
+    // ---- Fiverr Policy Safety Filter ----
+    const { applySafetyFilter } = await import("../_shared/safety.ts");
+    const profSafe = applySafetyFilter(profile_optimization, "profile");
+    const gigSafe = applySafetyFilter(gig_optimization, "gig");
+    const safeProfile = { ...profSafe.sanitized, safety_report: profSafe.report };
+    const safeGig = { ...gigSafe.sanitized, safety_report: gigSafe.report };
+
     await admin.from("research_results").insert({
       project_id: projectId,
       user_id: userId,
       scraped_data: { count: allItems.length, sample: compacted },
       insights,
-      profile_optimization,
-      gig_optimization,
+      profile_optimization: safeProfile,
+      gig_optimization: safeGig,
     });
+
 
     await admin
       .from("projects")
