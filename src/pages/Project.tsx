@@ -12,15 +12,18 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { SafetyReportPanel } from "@/components/SafetyReportPanel";
+import { FiverrFieldMeter } from "@/components/FiverrFieldMeter";
+import { FiverrPasteWizard } from "@/components/FiverrPasteWizard";
+import { validateSearchTags, type FiverrFieldKey } from "@/lib/fiverrLimits";
 
-
-// Fiverr platform limits used for warnings
-const LIMITS: Record<string, number> = {
-  gig_title: 80,
-  description: 1200,
-  short_bio: 150,
-  about: 500,
-  profile_title: 70,
+// Map internal field keys → Fiverr validator keys (only fields with a known Fiverr limit)
+const FIVERR_FIELD_MAP: Record<string, FiverrFieldKey> = {
+  gig_title: "gig_title",
+  description: "description",
+  short_bio: "short_bio",
+  about: "about",
+  profile_title: "profile_title",
+  display_name: "display_name",
 };
 
 const RUNNING_STATUSES = ["pending", "scraping", "analyzing"];
