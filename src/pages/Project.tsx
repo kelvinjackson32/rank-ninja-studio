@@ -150,6 +150,7 @@ const Project = () => {
             }>{project.status}</Badge>
             {result && (
               <>
+                <FiverrPasteWizard profile={result.profile_optimization} gig={result.gig_optimization} />
                 <Button size="sm" variant="outline" onClick={() => copy(markdown)}><Copy className="w-4 h-4 mr-1" />Copy all</Button>
                 <Button size="sm" variant="outline" onClick={exportMd}><Download className="w-4 h-4 mr-1" />Export .md</Button>
               </>
