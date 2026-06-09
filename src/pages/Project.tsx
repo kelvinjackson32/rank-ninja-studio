@@ -918,6 +918,7 @@ const GigView = ({ gig, resultId, onUpdate, copy }: any) => {
               <div key={tier} className={`rounded-lg p-4 border ${tier === "premium" ? "border-primary/40 bg-primary/5" : "border-border bg-muted/20"}`}>
                 <div className="font-mono text-xs uppercase tracking-wider text-muted-foreground">{tier}</div>
                 <div className="font-bold mt-1">{p.name}</div>
+                <FiverrFieldMeter fieldKey="package_name" value={p.name || ""} className="mt-1" />
                 <div className="text-2xl font-bold text-gradient font-mono mt-2">{p.price}</div>
                 <div className="text-xs text-muted-foreground mt-1">{p.delivery_days}d delivery · {p.revisions} revisions</div>
                 <ul className="text-xs space-y-1 mt-3">
