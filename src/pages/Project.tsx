@@ -844,12 +844,28 @@ const GigView = ({ gig, resultId, onUpdate, copy }: any) => {
       {f("Gig Title (≤80 chars)", "gig_title")}
       <div className="surface-card rounded-lg p-5">
         <div className="flex items-center justify-between mb-3">
-          <h3 className="font-semibold text-sm uppercase tracking-wider font-mono text-muted-foreground"><Tag className="w-4 h-4 inline mr-1" />Search Tags</h3>
-          <Button size="icon" variant="ghost" onClick={() => copy((gig.search_tags || []).join(", "))}><Copy className="w-4 h-4" /></Button>
+          <h3 className="font-semibold text-sm uppercase tracking-wider font-mono text-muted-foreground"><Tag className="w-4 h-4 inline mr-1" />Search Tags <span className="normal-case text-[10px] text-muted-foreground/70">(max 5, ≤20 chars each)</span></h3>
+          <Button size="icon" variant="ghost" onClick={() => copy((gig.search_tags || []).slice(0, 5).join(", "))}><Copy className="w-4 h-4" /></Button>
         </div>
-        <div className="flex flex-wrap gap-2">
-          {(gig.search_tags || []).map((t: string) => <Badge key={t} className="bg-secondary/10 text-secondary border-secondary/30">{t}</Badge>)}
-        </div>
+        {(() => {
+          const tags = (gig.search_tags || []) as string[];
+          const v = validateSearchTags(tags);
+          const tooMany = tags.length > 5;
+          return (
+            <>
+              <div className="flex flex-wrap gap-2">
+                {tags.map((t, i) => {
+                  const s = v[i].status;
+                  const cls = s === "error" ? "bg-destructive/15 text-destructive border-destructive/40"
+                    : s === "warn" ? "bg-warning/15 text-warning border-warning/40"
+                    : "bg-success/10 text-success border-success/30";
+                  return <Badge key={t + i} className={`${cls} font-mono`} title={v[i].message}>{t} <span className="opacity-60 ml-1">{t.length}/20</span></Badge>;
+                })}
+              </div>
+              {tooMany && <div className="text-xs text-destructive font-mono mt-2">⚠ Fiverr only allows 5 tags — drop the weakest {tags.length - 5}.</div>}
+            </>
+          );
+        })()}
       </div>
       {f("Description (≤1200 chars)", "description", true)}
       {Array.isArray(gig.buyer_requirements) && gig.buyer_requirements.length > 0 && (
