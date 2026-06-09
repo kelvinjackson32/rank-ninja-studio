@@ -12,15 +12,18 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { SafetyReportPanel } from "@/components/SafetyReportPanel";
+import { FiverrFieldMeter } from "@/components/FiverrFieldMeter";
+import { FiverrPasteWizard } from "@/components/FiverrPasteWizard";
+import { validateSearchTags, type FiverrFieldKey } from "@/lib/fiverrLimits";
 
-
-// Fiverr platform limits used for warnings
-const LIMITS: Record<string, number> = {
-  gig_title: 80,
-  description: 1200,
-  short_bio: 150,
-  about: 500,
-  profile_title: 70,
+// Map internal field keys → Fiverr validator keys (only fields with a known Fiverr limit)
+const FIVERR_FIELD_MAP: Record<string, FiverrFieldKey> = {
+  gig_title: "gig_title",
+  description: "description",
+  short_bio: "short_bio",
+  about: "about",
+  profile_title: "profile_title",
+  display_name: "display_name",
 };
 
 const RUNNING_STATUSES = ["pending", "scraping", "analyzing"];
@@ -147,6 +150,7 @@ const Project = () => {
             }>{project.status}</Badge>
             {result && (
               <>
+                <FiverrPasteWizard profile={result.profile_optimization} gig={result.gig_optimization} />
                 <Button size="sm" variant="outline" onClick={() => copy(markdown)}><Copy className="w-4 h-4 mr-1" />Copy all</Button>
                 <Button size="sm" variant="outline" onClick={exportMd}><Download className="w-4 h-4 mr-1" />Export .md</Button>
               </>
@@ -438,10 +442,7 @@ const Section = ({ title, children }: { title: string; children: React.ReactNode
 
 const Field = ({ label, value, resultId, section, fieldKey, onUpdate, copy, multiline = false }: any) => {
   const text = typeof value === "string" ? value : JSON.stringify(value, null, 2);
-  const limit = LIMITS[fieldKey];
-  const len = typeof value === "string" ? value.length : 0;
-  const over = limit && len > limit;
-  const near = limit && !over && len > limit * 0.9;
+  const fiverrKey = FIVERR_FIELD_MAP[fieldKey];
   return (
     <div className="surface-card rounded-lg p-5">
       <div className="flex items-center justify-between mb-3 gap-2">
@@ -454,10 +455,8 @@ const Field = ({ label, value, resultId, section, fieldKey, onUpdate, copy, mult
       <div className={`text-sm leading-relaxed ${multiline ? "whitespace-pre-wrap" : ""} ${typeof value === "string" ? "" : "font-mono text-xs"}`}>
         {typeof value === "string" ? value : <pre className="overflow-x-auto">{text}</pre>}
       </div>
-      {typeof value === "string" && (
-        <div className={`text-xs font-mono mt-2 ${over ? "text-destructive" : near ? "text-warning" : "text-muted-foreground"}`}>
-          {len}{limit ? ` / ${limit}` : ""} chars{over ? " — exceeds Fiverr limit, regenerate" : limit ? " (Fiverr limit)" : ""}
-        </div>
+      {typeof value === "string" && fiverrKey && (
+        <div className="mt-3"><FiverrFieldMeter fieldKey={fiverrKey} value={value} /></div>
       )}
     </div>
   );
@@ -845,12 +844,28 @@ const GigView = ({ gig, resultId, onUpdate, copy }: any) => {
       {f("Gig Title (≤80 chars)", "gig_title")}
       <div className="surface-card rounded-lg p-5">
         <div className="flex items-center justify-between mb-3">
-          <h3 className="font-semibold text-sm uppercase tracking-wider font-mono text-muted-foreground"><Tag className="w-4 h-4 inline mr-1" />Search Tags</h3>
-          <Button size="icon" variant="ghost" onClick={() => copy((gig.search_tags || []).join(", "))}><Copy className="w-4 h-4" /></Button>
+          <h3 className="font-semibold text-sm uppercase tracking-wider font-mono text-muted-foreground"><Tag className="w-4 h-4 inline mr-1" />Search Tags <span className="normal-case text-[10px] text-muted-foreground/70">(max 5, ≤20 chars each)</span></h3>
+          <Button size="icon" variant="ghost" onClick={() => copy((gig.search_tags || []).slice(0, 5).join(", "))}><Copy className="w-4 h-4" /></Button>
         </div>
-        <div className="flex flex-wrap gap-2">
-          {(gig.search_tags || []).map((t: string) => <Badge key={t} className="bg-secondary/10 text-secondary border-secondary/30">{t}</Badge>)}
-        </div>
+        {(() => {
+          const tags = (gig.search_tags || []) as string[];
+          const v = validateSearchTags(tags);
+          const tooMany = tags.length > 5;
+          return (
+            <>
+              <div className="flex flex-wrap gap-2">
+                {tags.map((t, i) => {
+                  const s = v[i].status;
+                  const cls = s === "error" ? "bg-destructive/15 text-destructive border-destructive/40"
+                    : s === "warn" ? "bg-warning/15 text-warning border-warning/40"
+                    : "bg-success/10 text-success border-success/30";
+                  return <Badge key={t + i} className={`${cls} font-mono`} title={v[i].message}>{t} <span className="opacity-60 ml-1">{t.length}/20</span></Badge>;
+                })}
+              </div>
+              {tooMany && <div className="text-xs text-destructive font-mono mt-2">⚠ Fiverr only allows 5 tags — drop the weakest {tags.length - 5}.</div>}
+            </>
+          );
+        })()}
       </div>
       {f("Description (≤1200 chars)", "description", true)}
       {Array.isArray(gig.buyer_requirements) && gig.buyer_requirements.length > 0 && (
@@ -903,6 +918,7 @@ const GigView = ({ gig, resultId, onUpdate, copy }: any) => {
               <div key={tier} className={`rounded-lg p-4 border ${tier === "premium" ? "border-primary/40 bg-primary/5" : "border-border bg-muted/20"}`}>
                 <div className="font-mono text-xs uppercase tracking-wider text-muted-foreground">{tier}</div>
                 <div className="font-bold mt-1">{p.name}</div>
+                <FiverrFieldMeter fieldKey="package_name" value={p.name || ""} className="mt-1" />
                 <div className="text-2xl font-bold text-gradient font-mono mt-2">{p.price}</div>
                 <div className="text-xs text-muted-foreground mt-1">{p.delivery_days}d delivery · {p.revisions} revisions</div>
                 <ul className="text-xs space-y-1 mt-3">
