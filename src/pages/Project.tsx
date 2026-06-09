@@ -441,10 +441,7 @@ const Section = ({ title, children }: { title: string; children: React.ReactNode
 
 const Field = ({ label, value, resultId, section, fieldKey, onUpdate, copy, multiline = false }: any) => {
   const text = typeof value === "string" ? value : JSON.stringify(value, null, 2);
-  const limit = LIMITS[fieldKey];
-  const len = typeof value === "string" ? value.length : 0;
-  const over = limit && len > limit;
-  const near = limit && !over && len > limit * 0.9;
+  const fiverrKey = FIVERR_FIELD_MAP[fieldKey];
   return (
     <div className="surface-card rounded-lg p-5">
       <div className="flex items-center justify-between mb-3 gap-2">
@@ -457,10 +454,8 @@ const Field = ({ label, value, resultId, section, fieldKey, onUpdate, copy, mult
       <div className={`text-sm leading-relaxed ${multiline ? "whitespace-pre-wrap" : ""} ${typeof value === "string" ? "" : "font-mono text-xs"}`}>
         {typeof value === "string" ? value : <pre className="overflow-x-auto">{text}</pre>}
       </div>
-      {typeof value === "string" && (
-        <div className={`text-xs font-mono mt-2 ${over ? "text-destructive" : near ? "text-warning" : "text-muted-foreground"}`}>
-          {len}{limit ? ` / ${limit}` : ""} chars{over ? " — exceeds Fiverr limit, regenerate" : limit ? " (Fiverr limit)" : ""}
-        </div>
+      {typeof value === "string" && fiverrKey && (
+        <div className="mt-3"><FiverrFieldMeter fieldKey={fiverrKey} value={value} /></div>
       )}
     </div>
   );
