@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { ArrowLeft, Copy, Loader2, Sparkles, RefreshCw, Tag, MessageSquare, Package, User, Download, Trophy, Lightbulb, Star, RotateCw, Image as ImageIcon, Type, Search, Gauge, ExternalLink, Rocket, Video, Film, FileText, Users } from "lucide-react";
+import { ArrowLeft, Copy, Loader2, Sparkles, RefreshCw, Tag, MessageSquare, Package, User, Download, Trophy, Lightbulb, Star, RotateCw, Image as ImageIcon, Type, Search, Gauge, ExternalLink, Rocket, Video, Film, FileText, Users, Target, Fingerprint } from "lucide-react";
 import { jsPDF } from "jspdf";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -14,6 +14,9 @@ import { toast } from "sonner";
 import { SafetyReportPanel } from "@/components/SafetyReportPanel";
 import { FiverrFieldMeter } from "@/components/FiverrFieldMeter";
 import { FiverrPasteWizard } from "@/components/FiverrPasteWizard";
+import { ThumbnailGenerator } from "@/components/ThumbnailGenerator";
+import { GapAnalysisPanel } from "@/components/GapAnalysisPanel";
+import { OriginalityPanel } from "@/components/OriginalityPanel";
 import { validateSearchTags, type FiverrFieldKey } from "@/lib/fiverrLimits";
 
 // Map internal field keys → Fiverr validator keys (only fields with a known Fiverr limit)
@@ -202,6 +205,8 @@ const Project = () => {
               <TabsTrigger value="profile"><User className="w-4 h-4 mr-1" />Profile</TabsTrigger>
               <TabsTrigger value="gig"><Package className="w-4 h-4 mr-1" />Gig</TabsTrigger>
               <TabsTrigger value="thumbnails"><ImageIcon className="w-4 h-4 mr-1" />Thumbnails</TabsTrigger>
+              <TabsTrigger value="gaps"><Target className="w-4 h-4 mr-1" />Gaps</TabsTrigger>
+              <TabsTrigger value="originality"><Fingerprint className="w-4 h-4 mr-1" />Originality</TabsTrigger>
               {result.gig_optimization?.is_video_gig && (
                 <TabsTrigger value="video"><Film className="w-4 h-4 mr-1" />Video Concepts</TabsTrigger>
               )}
@@ -234,6 +239,14 @@ const Project = () => {
 
             <TabsContent value="thumbnails" className="mt-6 space-y-4">
               <ThumbnailsView gig={result.gig_optimization} copy={copy} />
+            </TabsContent>
+
+            <TabsContent value="gaps" className="mt-6 space-y-4">
+              <GapAnalysisPanel projectId={project.id} initial={result.insights?.gap_analysis} onUpdate={load} />
+            </TabsContent>
+
+            <TabsContent value="originality" className="mt-6 space-y-4">
+              <OriginalityPanel projectId={project.id} initial={result.insights?.originality} onUpdate={load} />
             </TabsContent>
 
             {result.gig_optimization?.is_video_gig && (
@@ -621,6 +634,7 @@ const ThumbnailsView = ({ gig, copy }: any) => {
             <Button size="sm" variant="outline" onClick={() => copy(p.prompt)}><Copy className="w-4 h-4 mr-1" />Copy</Button>
           </div>
           <pre className="text-xs font-mono whitespace-pre-wrap bg-background/60 rounded-md p-3 mt-2 leading-relaxed">{p.prompt}</pre>
+          <ThumbnailGenerator prompt={p.prompt} style={p.style} />
         </div>
       ))}
     </div>
