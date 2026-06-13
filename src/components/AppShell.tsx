@@ -59,6 +59,7 @@ export const AppShell = ({ children }: { children: React.ReactNode }) => {
 
   return (
     <div className="min-h-screen flex bg-background">
+      <CommandPalette />
       {/* Desktop sidebar */}
       <aside className="hidden md:flex w-64 border-r border-border bg-sidebar flex-col">
         {SidebarInner}
@@ -80,12 +81,19 @@ export const AppShell = ({ children }: { children: React.ReactNode }) => {
           <Button variant="ghost" size="icon" onClick={() => setOpen(true)} aria-label="Open menu">
             <Menu className="w-5 h-5" />
           </Button>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-1">
             <div className="w-6 h-6 rounded-md bg-gradient-to-br from-primary to-secondary flex items-center justify-center">
               <Radar className="w-3 h-3 text-primary-foreground" />
             </div>
             <span className="font-bold text-sm">RankForge</span>
           </div>
+        </div>
+        {/* Desktop top bar with ⌘K hint */}
+        <div className="hidden md:flex items-center justify-end px-6 py-2 border-b border-border bg-background/60 backdrop-blur sticky top-0 z-30">
+          <kbd className="text-[10px] font-mono px-2 py-1 rounded border border-border bg-muted/40 text-muted-foreground inline-flex items-center gap-1">
+            <Command className="w-3 h-3" />K
+            <span className="ml-1 normal-case tracking-normal">Command Palette</span>
+          </kbd>
         </div>
         {children}
       </main>
