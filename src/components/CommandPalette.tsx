@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator } from "@/components/ui/command";
-import { Activity, FolderKanban, Key, Plus, Stethoscope, LogOut } from "lucide-react";
+import { Activity, FolderKanban, Key, Plus, Stethoscope, LogOut, MessageSquare } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 
 export const CommandPalette = () => {
@@ -29,6 +29,7 @@ export const CommandPalette = () => {
         <CommandEmpty>No results.</CommandEmpty>
         <CommandGroup heading="Navigate">
           <CommandItem onSelect={() => go("/app")}><Activity className="w-4 h-4 mr-2" />Dashboard</CommandItem>
+          <CommandItem onSelect={() => go("/app/chat")}><MessageSquare className="w-4 h-4 mr-2" />AI Chat</CommandItem>
           <CommandItem onSelect={() => go("/app/projects")}><FolderKanban className="w-4 h-4 mr-2" />Projects</CommandItem>
           <CommandItem onSelect={() => go("/app/audit")}><Stethoscope className="w-4 h-4 mr-2" />Audit Account</CommandItem>
           <CommandItem onSelect={() => go("/app/settings")}><Key className="w-4 h-4 mr-2" />API Keys</CommandItem>
