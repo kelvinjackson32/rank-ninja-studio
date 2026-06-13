@@ -13,15 +13,55 @@ async function callGemini(prompt: string, system: string, key: string) {
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: system }] },
       contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.4, maxOutputTokens: 3000, responseMimeType: "application/json" },
+      generationConfig: { temperature: 0.4, maxOutputTokens: 8192, responseMimeType: "application/json" },
     }),
     signal: AbortSignal.timeout(90_000),
   });
   if (!resp.ok) throw new Error(`Gemini ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
   const data = await resp.json();
   const text = data.candidates?.[0]?.content?.parts?.map((p: any) => p.text).filter(Boolean).join("\n") || "";
-  const cleaned = text.replace(/^```(?:json)?\s*|\s*```$/g, "").trim();
-  return JSON.parse(cleaned);
+  const finishReason = data.candidates?.[0]?.finishReason;
+  let cleaned = text.replace(/^```(?:json)?\s*|\s*```$/g, "").trim();
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    // Attempt repair for truncated JSON (e.g. MAX_TOKENS)
+    // Close any unterminated string, then close open brackets/braces.
+    let repaired = cleaned;
+    // Remove trailing incomplete content after last complete item
+    const lastComma = Math.max(repaired.lastIndexOf("},"), repaired.lastIndexOf("],"), repaired.lastIndexOf('",'));
+    // Count quotes to detect open string
+    let inStr = false, esc = false;
+    for (let i = 0; i < repaired.length; i++) {
+      const c = repaired[i];
+      if (esc) { esc = false; continue; }
+      if (c === "\\") { esc = true; continue; }
+      if (c === '"') inStr = !inStr;
+    }
+    if (inStr) repaired += '"';
+    // Balance brackets
+    const opens = (repaired.match(/[\{\[]/g) || []);
+    const closes = (repaired.match(/[\}\]]/g) || []);
+    const stack: string[] = [];
+    let inStr2 = false, esc2 = false;
+    for (const c of repaired) {
+      if (esc2) { esc2 = false; continue; }
+      if (c === "\\") { esc2 = true; continue; }
+      if (c === '"') { inStr2 = !inStr2; continue; }
+      if (inStr2) continue;
+      if (c === "{") stack.push("}");
+      else if (c === "[") stack.push("]");
+      else if (c === "}" || c === "]") stack.pop();
+    }
+    // Strip trailing comma before closing
+    repaired = repaired.replace(/,\s*$/, "");
+    while (stack.length) repaired += stack.pop();
+    try {
+      return JSON.parse(repaired);
+    } catch (e) {
+      throw new Error(`Gemini returned malformed JSON (finishReason=${finishReason}): ${String(e).slice(0,200)}`);
+    }
+  }
 }
 
 Deno.serve(async (req) => {
