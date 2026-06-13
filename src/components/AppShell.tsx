@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { Activity, Key, FolderKanban, LogOut, Radar, Menu, X, Stethoscope } from "lucide-react";
+import { Activity, Key, FolderKanban, LogOut, Radar, Menu, X, Stethoscope, Command } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { CommandPalette } from "@/components/CommandPalette";
 
 const items = [
   { to: "/app", label: "Dashboard", icon: Activity },
