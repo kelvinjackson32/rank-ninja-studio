@@ -13,7 +13,7 @@ async function callGemini(prompt: string, system: string, key: string) {
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: system }] },
       contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.4, maxOutputTokens: 3000, responseMimeType: "application/json" },
+      generationConfig: { temperature: 0.4, maxOutputTokens: 8192, responseMimeType: "application/json" },
     }),
     signal: AbortSignal.timeout(90_000),
   });
