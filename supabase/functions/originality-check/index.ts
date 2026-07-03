@@ -17,6 +17,13 @@ async function callGemini(prompt: string, system: string, key: string) {
     }),
     signal: AbortSignal.timeout(90_000),
   });
+  if (resp.status === 429) {
+    const txt = await resp.text();
+    const isNoQuota = /limit:\s*0|quota exceeded|free_tier_requests/i.test(txt);
+    throw new Error(isNoQuota
+      ? "Gemini key is recognized, but its Google project has no Gemini generation quota. Use a key from a Google AI Studio project with Gemini API quota/billing."
+      : "Gemini quota/rate limit hit for this key. Wait a moment or switch to another Google project key.");
+  }
   if (!resp.ok) throw new Error(`Gemini ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
   const data = await resp.json();
   const text = data.candidates?.[0]?.content?.parts?.map((p: any) => p.text).filter(Boolean).join("\n") || "";

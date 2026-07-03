@@ -38,7 +38,13 @@ export async function callGemini(
       }),
       signal: controller.signal,
     });
-    if (resp.status === 429) throw new Error("Gemini rate limit hit. Wait a moment and retry.");
+    if (resp.status === 429) {
+      const txt = await resp.text();
+      const isNoQuota = /limit:\s*0|quota exceeded|free_tier_requests/i.test(txt);
+      throw new Error(isNoQuota
+        ? "Gemini key is recognized, but its Google project has no Gemini generation quota. Use a key from a Google AI Studio project with Gemini API quota/billing."
+        : "Gemini quota/rate limit hit for this key. Wait a moment or switch to another Google project key.");
+    }
     if (resp.status === 401 || resp.status === 403) {
       throw new Error("Gemini API key invalid or unauthorized. Update it in Settings → AI Generation.");
     }
