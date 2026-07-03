@@ -5,10 +5,18 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// Quick ping to Google Gemini to verify the user's key.
-async function testKey(apiKey: string): Promise<{ ok: boolean; error?: string }> {
+// Quick ping to Google Gemini to verify the user's key and generation quota.
+async function testKey(apiKey: string): Promise<{ ok: boolean; status?: "invalid" | "quota" | "network"; error?: string }> {
   if (!apiKey || apiKey.length < 10) return { ok: false, error: "Key looks too short." };
   try {
+    const modelsResp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}`, {
+      method: "GET",
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (modelsResp.status === 401 || modelsResp.status === 403) {
+      return { ok: false, status: "invalid", error: "Google rejected this key. Copy the API key again from Google AI Studio and paste the full value." };
+    }
+
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`;
     const resp = await fetch(url, {
       method: "POST",
@@ -19,8 +27,18 @@ async function testKey(apiKey: string): Promise<{ ok: boolean; error?: string }>
       }),
       signal: AbortSignal.timeout(20_000),
     });
-    if (resp.status === 401 || resp.status === 403) return { ok: false, error: "Invalid or unauthorized key." };
-    if (resp.status === 429) return { ok: false, error: "Rate limited — key works but you've hit a quota." };
+    if (resp.status === 401 || resp.status === 403) return { ok: false, status: "invalid", error: "Google rejected this key. Copy the API key again from Google AI Studio and paste the full value." };
+    if (resp.status === 429) {
+      const txt = await resp.text();
+      const isNoQuota = /limit:\s*0|quota exceeded|free_tier_requests/i.test(txt);
+      return {
+        ok: false,
+        status: "quota",
+        error: isNoQuota
+          ? "This key is recognized, but its Google project has no Gemini generation quota. In Google AI Studio, create/select a project with Gemini API access or enable billing/quota, then test again."
+          : "This key is recognized, but Gemini rate limit/quota is currently exhausted. Wait or use another Google project key.",
+      };
+    }
     if (!resp.ok) {
       const txt = await resp.text();
       return { ok: false, error: `Gemini ${resp.status}: ${txt.slice(0, 200)}` };
@@ -30,7 +48,7 @@ async function testKey(apiKey: string): Promise<{ ok: boolean; error?: string }>
     if (!text) return { ok: false, error: "Empty response from Gemini." };
     return { ok: true };
   } catch (e: any) {
-    return { ok: false, error: e?.message || "Network error contacting Gemini." };
+    return { ok: false, status: "network", error: e?.message || "Network error contacting Gemini." };
   }
 }
 

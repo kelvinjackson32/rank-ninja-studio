@@ -12,7 +12,7 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 
 type Key = { id: string; name: string; api_key: string; actor_id: string | null; status: string; last_used_at: string | null; error_message: string | null };
-type GeminiStatus = "unknown" | "testing" | "connected" | "invalid";
+type GeminiStatus = "unknown" | "testing" | "connected" | "invalid" | "quota";
 
 const Settings = () => {
   const { user } = useAuth();
@@ -88,6 +88,9 @@ const Settings = () => {
     if (data?.ok) {
       setGeminiStatus("connected");
       toast.success("Gemini key works!");
+    } else if (data?.status === "quota") {
+      setGeminiStatus("quota");
+      setGeminiError(data?.error || "This key is recognized, but Gemini generation quota is not available on its Google project.");
     } else {
       setGeminiStatus("invalid");
       setGeminiError(data?.error || "Unknown error");
@@ -137,6 +140,7 @@ const Settings = () => {
   const geminiBadge = () => {
     if (geminiStatus === "testing") return <Badge className="bg-muted text-muted-foreground border-border"><Loader2 className="w-3 h-3 mr-1 animate-spin" />Testing</Badge>;
     if (geminiStatus === "connected") return <Badge className="bg-success/15 text-success border-success/30"><CheckCircle2 className="w-3 h-3 mr-1" />Connected</Badge>;
+    if (geminiStatus === "quota") return <Badge className="bg-warning/15 text-warning border-warning/30"><AlertCircle className="w-3 h-3 mr-1" />Quota issue</Badge>;
     if (geminiStatus === "invalid") return <Badge className="bg-destructive/15 text-destructive border-destructive/30"><AlertCircle className="w-3 h-3 mr-1" />Invalid</Badge>;
     return <Badge variant="outline">Not tested</Badge>;
   };
@@ -166,7 +170,7 @@ const Settings = () => {
                 type="password"
                 value={geminiKey}
                 onChange={(e) => { setGeminiKey(e.target.value); setGeminiStatus("unknown"); setGeminiError(null); }}
-                placeholder="AIza..."
+                placeholder="Paste the exact key Google gives you"
                 className="mt-1.5 font-mono bg-input/50"
               />
               <p className="text-xs text-muted-foreground mt-1.5 flex items-center gap-1">
@@ -174,6 +178,9 @@ const Settings = () => {
                 <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" className="text-primary hover:underline inline-flex items-center gap-0.5">
                   aistudio.google.com/apikey <ExternalLink className="w-3 h-3" />
                 </a>
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Google may show different key formats. The app will test the key directly instead of checking the prefix.
               </p>
             </div>
 

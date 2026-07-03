@@ -84,6 +84,18 @@ Deno.serve(async (req) => {
       }),
     });
 
+    if (resp.status === 429) {
+      const txt = await resp.text();
+      const isNoQuota = /limit:\s*0|quota exceeded|free_tier_requests/i.test(txt);
+      return new Response(JSON.stringify({
+        error: isNoQuota
+          ? "Your Gemini key is recognized, but its Google project has no Gemini generation quota. Open Settings → AI Generation, use a key from a project with Gemini API quota/billing, then try again."
+          : "Gemini quota/rate limit reached for this key. Wait a bit or switch to another Google project key in Settings.",
+      }), { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    if (resp.status === 401 || resp.status === 403) {
+      return new Response(JSON.stringify({ error: "Gemini key was rejected by Google. Update it in Settings → AI Generation." }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
     if (!resp.ok) {
       const txt = await resp.text();
       return new Response(JSON.stringify({ error: `Gemini ${resp.status}: ${txt.slice(0, 400)}` }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
