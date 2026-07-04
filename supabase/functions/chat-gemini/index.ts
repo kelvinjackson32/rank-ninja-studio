@@ -47,61 +47,109 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: "Thread not found" }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // Get Gemini key
+    // Get optional user Gemini key (override); otherwise use Lovable AI Gateway
     const { data: ai } = await admin.from("user_ai_settings").select("gemini_api_key").eq("user_id", userId).maybeSingle();
     const geminiKey = (ai?.gemini_api_key || "").trim();
-    if (!geminiKey) {
-      return new Response(JSON.stringify({ error: "No Gemini API key configured. Open Settings → AI Generation and paste your free Google Gemini key." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    }
+    const LOVABLE_KEY = Deno.env.get("LOVABLE_API_KEY") || "";
 
-    // Build Gemini contents
-    const contents: any[] = [];
-    for (const m of messages) {
-      const parts: any[] = [];
-      if (m.content?.trim()) parts.push({ text: m.content });
-      if (m.role === "user" && m.images?.length) {
-        for (const img of m.images) {
-          try {
-            const b64 = await fetchImageAsBase64(admin, img.path);
-            parts.push({ inline_data: { mime_type: img.mime || "image/jpeg", data: b64 } });
-          } catch (e) {
-            parts.push({ text: `[image failed to load: ${(e as Error).message}]` });
+    // ---------- Call user's Gemini key first (if present) ----------
+    async function callUserGemini(): Promise<{ ok: boolean; text?: string; retryable?: boolean; error?: string }> {
+      const contents: any[] = [];
+      for (const m of messages) {
+        const parts: any[] = [];
+        if (m.content?.trim()) parts.push({ text: m.content });
+        if (m.role === "user" && m.images?.length) {
+          for (const img of m.images) {
+            try {
+              const b64 = await fetchImageAsBase64(admin, img.path);
+              parts.push({ inline_data: { mime_type: img.mime || "image/jpeg", data: b64 } });
+            } catch (e) {
+              parts.push({ text: `[image failed to load: ${(e as Error).message}]` });
+            }
           }
         }
+        if (parts.length === 0) parts.push({ text: " " });
+        contents.push({ role: m.role === "assistant" ? "model" : "user", parts });
       }
-      if (parts.length === 0) parts.push({ text: " " });
-      contents.push({ role: m.role === "assistant" ? "model" : "user", parts });
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${encodeURIComponent(geminiKey)}`;
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: SYSTEM }] },
+          contents,
+          generationConfig: { temperature: 0.7, maxOutputTokens: 8192 },
+        }),
+      });
+      if (resp.status === 429 || resp.status === 401 || resp.status === 403) {
+        return { ok: false, retryable: true, error: `user_key_${resp.status}` };
+      }
+      if (!resp.ok) {
+        const txt = await resp.text();
+        return { ok: false, retryable: false, error: `Gemini ${resp.status}: ${txt.slice(0, 400)}` };
+      }
+      const data = await resp.json();
+      const text = data.candidates?.[0]?.content?.parts?.map((p: any) => p.text).filter(Boolean).join("\n") || "(empty response)";
+      return { ok: true, text };
     }
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${encodeURIComponent(geminiKey)}`;
-    const resp = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: SYSTEM }] },
-        contents,
-        generationConfig: { temperature: 0.7, maxOutputTokens: 8192 },
-      }),
-    });
+    // ---------- Lovable AI Gateway fallback (no user key needed) ----------
+    async function callLovableAI(): Promise<{ ok: boolean; text?: string; error?: string; status?: number }> {
+      if (!LOVABLE_KEY) return { ok: false, error: "Lovable AI not configured", status: 500 };
+      const gwMessages: any[] = [{ role: "system", content: SYSTEM }];
+      for (const m of messages) {
+        const content: any[] = [];
+        if (m.content?.trim()) content.push({ type: "text", text: m.content });
+        if (m.role === "user" && m.images?.length) {
+          for (const img of m.images) {
+            try {
+              const b64 = await fetchImageAsBase64(admin, img.path);
+              content.push({ type: "image_url", image_url: { url: `data:${img.mime || "image/jpeg"};base64,${b64}` } });
+            } catch (e) {
+              content.push({ type: "text", text: `[image failed to load: ${(e as Error).message}]` });
+            }
+          }
+        }
+        gwMessages.push({ role: m.role, content: content.length === 1 && content[0].type === "text" ? content[0].text : content });
+      }
+      const resp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${LOVABLE_KEY}` },
+        body: JSON.stringify({ model: "google/gemini-2.5-flash", messages: gwMessages }),
+      });
+      if (resp.status === 429) return { ok: false, error: "Rate limit reached on Lovable AI. Try again shortly.", status: 429 };
+      if (resp.status === 402) return { ok: false, error: "Lovable AI credits exhausted. Add credits in Settings → Workspace → Usage.", status: 402 };
+      if (!resp.ok) {
+        const txt = await resp.text();
+        return { ok: false, error: `Lovable AI ${resp.status}: ${txt.slice(0, 400)}`, status: 500 };
+      }
+      const data = await resp.json();
+      const text = data.choices?.[0]?.message?.content || "(empty response)";
+      return { ok: true, text };
+    }
 
-    if (resp.status === 429) {
-      const txt = await resp.text();
-      const isNoQuota = /limit:\s*0|quota exceeded|free_tier_requests/i.test(txt);
-      return new Response(JSON.stringify({
-        error: isNoQuota
-          ? "Your Gemini key is recognized, but its Google project has no Gemini generation quota. Open Settings → AI Generation, use a key from a project with Gemini API quota/billing, then try again."
-          : "Gemini quota/rate limit reached for this key. Wait a bit or switch to another Google project key in Settings.",
-      }), { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    let text: string;
+    if (geminiKey) {
+      const r = await callUserGemini();
+      if (r.ok) {
+        text = r.text!;
+      } else if (r.retryable) {
+        // User key hit quota/auth — silently fall back to Lovable AI
+        const fb = await callLovableAI();
+        if (!fb.ok) {
+          return new Response(JSON.stringify({ error: fb.error }), { status: fb.status || 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        }
+        text = fb.text!;
+      } else {
+        return new Response(JSON.stringify({ error: r.error }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+    } else {
+      const fb = await callLovableAI();
+      if (!fb.ok) {
+        return new Response(JSON.stringify({ error: fb.error }), { status: fb.status || 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      text = fb.text!;
     }
-    if (resp.status === 401 || resp.status === 403) {
-      return new Response(JSON.stringify({ error: "Gemini key was rejected by Google. Update it in Settings → AI Generation." }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    }
-    if (!resp.ok) {
-      const txt = await resp.text();
-      return new Response(JSON.stringify({ error: `Gemini ${resp.status}: ${txt.slice(0, 400)}` }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    }
-    const data = await resp.json();
-    const text = data.candidates?.[0]?.content?.parts?.map((p: any) => p.text).filter(Boolean).join("\n") || "(empty response)";
 
     // Save assistant message
     await admin.from("chat_messages").insert({ thread_id: threadId, user_id: userId, role: "assistant", content: text, images: [] });
