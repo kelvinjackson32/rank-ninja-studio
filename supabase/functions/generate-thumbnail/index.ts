@@ -34,14 +34,30 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Fiverr top-seller gig thumbnail formula — proven high-CTR pattern.
+    const enhancedPrompt = `Create a Fiverr GIG THUMBNAIL (1280x769, landscape 5:3) engineered for maximum click-through and conversions, modeled after the top-selling gigs on Fiverr.
+
+USER BRIEF: ${prompt}
+
+MANDATORY DESIGN RULES (top-converting Fiverr gigs follow ALL of these):
+- Bold, punchy HEADLINE text (3–6 words max), extra-large, ultra-legible even at thumbnail size. Use a strong sans-serif (Poppins/Montserrat/Inter Black). Place it on the LEFT half.
+- Include a strong benefit-driven CALL TO ACTION or promise (e.g. "RANK #1 ON GOOGLE", "10X YOUR SALES", "PRO LOGO IN 24H", "GUARANTEED RESULTS"). No spelling mistakes.
+- High-contrast color palette: deep background (navy, black, dark gradient) with ONE vivid accent (electric yellow, neon green, orange, or hot red) for the headline / CTA. Avoid muddy or pastel colors.
+- Add a small trust badge / ribbon in a corner: "★ TOP RATED", "100% GUARANTEE", "24H DELIVERY", or "PRO SELLER".
+- RIGHT half: a bold visual — realistic product mockup, professional photo of the deliverable, or a confident smiling seller headshot. Sharp, well-lit, professional studio quality.
+- Use depth: subtle drop shadows, soft glow behind the headline, a slight gradient overlay so text pops off the background.
+- Absolutely NO cluttered stock backgrounds, NO watermarks, NO tiny unreadable text, NO Fiverr logo, NO fake reviews.
+- Composition: clean grid, generous padding from edges, headline aligned left, visual anchor right. Buyer must understand the offer in under 1 second.
+- Output must look like a PREMIUM, professionally-designed Fiverr thumbnail from a Level 2 / Top Rated seller — not AI-generic, not amateur.`;
+
     const upstream = await fetch("https://ai.gateway.lovable.dev/v1/images/generations", {
       method: "POST",
       headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         model: "openai/gpt-image-2",
-        prompt,
-        size: size || "1024x1024",
-        quality: "low",
+        prompt: enhancedPrompt,
+        size: size || "1536x1024",
+        quality: "high",
         n: 1,
       }),
     });

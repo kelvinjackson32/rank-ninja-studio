@@ -10,8 +10,8 @@ const items = [
   { to: "/app", label: "Dashboard", icon: Activity },
   { to: "/app/chat", label: "AI Chat", icon: MessageSquare },
   { to: "/app/projects", label: "Projects", icon: FolderKanban },
-  { to: "/app/audit", label: "Audit Account", icon: Stethoscope },
-  { to: "/app/settings", label: "API Keys", icon: Key },
+  { to: "/app/audit", label: "Audit", icon: Stethoscope },
+  { to: "/app/settings", label: "Keys", icon: Key },
 ];
 
 export const AppShell = ({ children }: { children: React.ReactNode }) => {
@@ -19,6 +19,9 @@ export const AppShell = ({ children }: { children: React.ReactNode }) => {
   const nav = useNavigate();
   const loc = useLocation();
   const [open, setOpen] = useState(false);
+
+  const isActive = (to: string) =>
+    loc.pathname === to || (to !== "/app" && loc.pathname.startsWith(to));
 
   const SidebarInner = (
     <>
@@ -38,7 +41,7 @@ export const AppShell = ({ children }: { children: React.ReactNode }) => {
       </div>
       <nav className="flex-1 p-3 space-y-1">
         {items.map((it) => {
-          const active = loc.pathname === it.to || (it.to !== "/app" && loc.pathname.startsWith(it.to));
+          const active = isActive(it.to);
           return (
             <Link key={it.to} to={it.to} onClick={() => setOpen(false)} className={cn(
               "flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors",
@@ -66,9 +69,9 @@ export const AppShell = ({ children }: { children: React.ReactNode }) => {
         {SidebarInner}
       </aside>
 
-      {/* Mobile drawer */}
+      {/* Mobile drawer (for sign out / email) */}
       {open && (
-        <div className="fixed inset-0 z-40 md:hidden">
+        <div className="fixed inset-0 z-50 md:hidden">
           <div className="absolute inset-0 bg-background/80 backdrop-blur-sm" onClick={() => setOpen(false)} />
           <aside className="absolute left-0 top-0 bottom-0 w-72 border-r border-border bg-sidebar flex flex-col">
             {SidebarInner}
@@ -76,18 +79,18 @@ export const AppShell = ({ children }: { children: React.ReactNode }) => {
         </div>
       )}
 
-      <main className="flex-1 overflow-auto min-w-0">
+      <main className="flex-1 overflow-auto min-w-0 pb-20 md:pb-0">
         {/* Mobile header */}
         <div className="md:hidden flex items-center gap-2 p-3 border-b border-border bg-background/80 backdrop-blur sticky top-0 z-30">
           <Button variant="ghost" size="icon" onClick={() => setOpen(true)} aria-label="Open menu">
             <Menu className="w-5 h-5" />
           </Button>
-          <div className="flex items-center gap-2 flex-1">
+          <Link to="/app" className="flex items-center gap-2 flex-1">
             <div className="w-6 h-6 rounded-md bg-gradient-to-br from-primary to-secondary flex items-center justify-center">
               <Radar className="w-3 h-3 text-primary-foreground" />
             </div>
             <span className="font-bold text-sm">RankForge</span>
-          </div>
+          </Link>
         </div>
         {/* Desktop top bar with ⌘K hint */}
         <div className="hidden md:flex items-center justify-end px-6 py-2 border-b border-border bg-background/60 backdrop-blur sticky top-0 z-30">
@@ -98,6 +101,32 @@ export const AppShell = ({ children }: { children: React.ReactNode }) => {
         </div>
         {children}
       </main>
+
+      {/* Mobile bottom tab bar — all main sections listed for one-tap access */}
+      <nav
+        className="md:hidden fixed bottom-0 inset-x-0 z-40 border-t border-border bg-background/95 backdrop-blur pb-[env(safe-area-inset-bottom)]"
+        aria-label="Primary"
+      >
+        <ul className="grid grid-cols-5">
+          {items.map((it) => {
+            const active = isActive(it.to);
+            return (
+              <li key={it.to}>
+                <Link
+                  to={it.to}
+                  className={cn(
+                    "flex flex-col items-center justify-center gap-0.5 py-2 text-[10px] font-medium transition-colors",
+                    active ? "text-primary" : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  <it.icon className={cn("w-5 h-5", active && "drop-shadow-[0_0_6px_hsl(var(--primary))]")} />
+                  <span className="leading-none">{it.label}</span>
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+      </nav>
     </div>
   );
 };
