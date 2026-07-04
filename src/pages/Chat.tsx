@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useMemo } from "react";
+import { useEffect, useRef, useState, useMemo, useCallback, memo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -24,6 +24,168 @@ type Thread = { id: string; title: string; updated_at: string };
 type ImgRef = { path: string; mime: string; url?: string };
 type Msg = { id: string; role: "user" | "assistant"; content: string; images: ImgRef[]; created_at: string };
 
+/* ------------------------------------------------------------------ */
+/* Composer: owns its OWN input state so typing does NOT re-render    */
+/* the whole Chat page (which contains expensive ReactMarkdown).      */
+/* ------------------------------------------------------------------ */
+const Composer = memo(function Composer({
+  sending,
+  onSend,
+}: {
+  sending: boolean;
+  onSend: (text: string, files: File[]) => Promise<void> | void;
+}) {
+  const [input, setInput] = useState("");
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const taRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => { taRef.current?.focus(); }, []);
+  useEffect(() => { if (!sending) taRef.current?.focus(); }, [sending]);
+
+  const doSend = useCallback(async () => {
+    const text = input.trim();
+    if (!text && pendingFiles.length === 0) return;
+    const files = pendingFiles;
+    setInput("");
+    setPendingFiles([]);
+    await onSend(text, files);
+  }, [input, pendingFiles, onSend]);
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); doSend(); }
+  };
+
+  const onFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    setPendingFiles(prev => [...prev, ...files]);
+    if (fileRef.current) fileRef.current.value = "";
+  };
+
+  return (
+    <div className="border-t border-border bg-background/80 backdrop-blur p-3">
+      <div className="max-w-3xl mx-auto">
+        {pendingFiles.length > 0 && (
+          <div className="flex flex-wrap gap-2 mb-2">
+            {pendingFiles.map((f, i) => (
+              <div key={i} className="relative">
+                <img src={URL.createObjectURL(f)} alt="" className="h-16 w-16 object-cover rounded-md border border-border" />
+                <button onClick={() => setPendingFiles(pendingFiles.filter((_, j) => j !== i))}
+                  className="absolute -top-1 -right-1 bg-destructive text-destructive-foreground rounded-full p-0.5">
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="flex gap-2 items-end">
+          <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={onFilePick} />
+          <Button variant="outline" size="icon" onClick={() => fileRef.current?.click()} title="Attach images" disabled={sending}>
+            <ImageIcon className="w-4 h-4" />
+          </Button>
+          <Textarea
+            ref={taRef}
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={onKeyDown}
+            placeholder="Type your message… (Shift+Enter for new line)"
+            rows={1}
+            className="flex-1 resize-none max-h-40 font-medium text-base"
+            disabled={sending}
+          />
+          <Button onClick={doSend} disabled={sending || (!input.trim() && pendingFiles.length === 0)}
+            className="bg-gradient-to-r from-primary to-secondary text-primary-foreground">
+            {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+          </Button>
+        </div>
+        <p className="text-[10px] text-muted-foreground mt-1.5 text-center">
+          Chats are saved automatically — the AI remembers this conversation.
+        </p>
+      </div>
+    </div>
+  );
+});
+
+/* ------------------------------------------------------------------ */
+/* MessageBubble: memoized so it doesn't re-render on unrelated state */
+/* ------------------------------------------------------------------ */
+const MessageBubble = memo(function MessageBubble({
+  m, editingId, editText, copiedId,
+  onCopy, onStartEdit, onSaveEdit, onCancelEdit, onEditTextChange,
+  onResend, onDelete,
+}: {
+  m: Msg;
+  editingId: string | null;
+  editText: string;
+  copiedId: string | null;
+  onCopy: (m: Msg) => void;
+  onStartEdit: (m: Msg) => void;
+  onSaveEdit: (id: string) => void;
+  onCancelEdit: () => void;
+  onEditTextChange: (v: string) => void;
+  onResend: (id: string) => void;
+  onDelete: (id: string) => void;
+}) {
+  return (
+    <div className={cn("group", m.role === "user" ? "flex justify-end" : "")}>
+      <div className={cn(
+        "max-w-[85%] rounded-2xl px-4 py-3",
+        m.role === "user"
+          ? "bg-primary text-primary-foreground font-medium"
+          : "bg-card border border-border"
+      )}>
+        {m.images?.length > 0 && (
+          <div className="flex flex-wrap gap-2 mb-2">
+            {m.images.map((img, i) => (
+              <a key={i} href={img.url} target="_blank" rel="noreferrer">
+                <img src={img.url} alt="" className="max-h-48 rounded-lg border border-border/40" loading="lazy" />
+              </a>
+            ))}
+          </div>
+        )}
+        {editingId === m.id ? (
+          <div className="space-y-2">
+            <Textarea value={editText} onChange={e => onEditTextChange(e.target.value)} className="bg-background text-foreground" rows={3} />
+            <div className="flex gap-2">
+              <Button size="sm" onClick={() => onSaveEdit(m.id)}>Save</Button>
+              <Button size="sm" variant="ghost" onClick={onCancelEdit}>Cancel</Button>
+            </div>
+          </div>
+        ) : m.role === "assistant" ? (
+          <div className="prose prose-invert prose-sm max-w-none font-medium prose-strong:font-bold prose-headings:font-bold prose-p:leading-relaxed">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content || "*(empty)*"}</ReactMarkdown>
+          </div>
+        ) : (
+          <div className="whitespace-pre-wrap leading-relaxed">{m.content}</div>
+        )}
+      </div>
+      {editingId !== m.id && (
+        <div className={cn(
+          "flex gap-1 opacity-0 group-hover:opacity-100 transition self-end mb-1",
+          m.role === "user" ? "order-first mr-2" : "ml-2"
+        )}>
+          <button onClick={() => onCopy(m)} className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground" title="Copy">
+            {copiedId === m.id ? <Check className="w-3.5 h-3.5 text-success" /> : <Copy className="w-3.5 h-3.5" />}
+          </button>
+          {m.role === "user" && (
+            <>
+              <button onClick={() => onStartEdit(m)} className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground" title="Edit">
+                <Pencil className="w-3.5 h-3.5" />
+              </button>
+              <button onClick={() => onResend(m.id)} className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground" title="Resend">
+                <RefreshCw className="w-3.5 h-3.5" />
+              </button>
+            </>
+          )}
+          <button onClick={() => onDelete(m.id)} className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-destructive" title="Delete">
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+});
+
 const Chat = () => {
   const { user } = useAuth();
   const { threadId } = useParams();
@@ -31,8 +193,6 @@ const Chat = () => {
 
   const [threads, setThreads] = useState<Thread[]>([]);
   const [messages, setMessages] = useState<Msg[]>([]);
-  const [input, setInput] = useState("");
-  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [sending, setSending] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
@@ -41,21 +201,21 @@ const Chat = () => {
   const [deleteThreadId, setDeleteThreadId] = useState<string | null>(null);
   const [showSidebar, setShowSidebar] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const taRef = useRef<HTMLTextAreaElement>(null);
+  const messagesRef = useRef<Msg[]>([]);
+  useEffect(() => { messagesRef.current = messages; }, [messages]);
 
   // Load threads
-  const loadThreads = async () => {
+  const loadThreads = useCallback(async () => {
     const { data } = await supabase
       .from("chat_threads")
       .select("id,title,updated_at")
       .order("updated_at", { ascending: false });
     setThreads((data as Thread[]) || []);
-  };
-  useEffect(() => { if (user) loadThreads(); }, [user]);
+  }, []);
+  useEffect(() => { if (user) loadThreads(); }, [user, loadThreads]);
 
-  // Bootstrap: if no threadId in URL, pick most recent or create
+  // Bootstrap
   useEffect(() => {
     if (!user || threadId) return;
     (async () => {
@@ -70,7 +230,7 @@ const Chat = () => {
     })();
   }, [user, threadId, nav]);
 
-  // Load messages for current thread
+  // Load messages
   useEffect(() => {
     if (!threadId) { setMessages([]); return; }
     (async () => {
@@ -80,7 +240,6 @@ const Chat = () => {
         .eq("thread_id", threadId)
         .order("created_at", { ascending: true });
       const list = (data as any[] || []).map(m => ({ ...m, images: (m.images || []) as ImgRef[] })) as Msg[];
-      // Resolve signed urls for previews
       for (const m of list) {
         if (m.images?.length) {
           const paths = m.images.map(i => i.path);
@@ -89,14 +248,13 @@ const Chat = () => {
         }
       }
       setMessages(list);
-      setTimeout(() => { taRef.current?.focus(); scrollRef.current?.scrollTo({ top: 1e9 }); }, 50);
+      setTimeout(() => { scrollRef.current?.scrollTo({ top: 1e9 }); }, 50);
     })();
   }, [threadId]);
 
-  // Auto-scroll
   useEffect(() => { scrollRef.current?.scrollTo({ top: 1e9, behavior: "smooth" }); }, [messages, sending]);
 
-  const newThread = async () => {
+  const newThread = useCallback(async () => {
     if (!user) return;
     const { data, error } = await supabase.from("chat_threads")
       .insert({ user_id: user.id, title: "New chat" }).select("id").maybeSingle();
@@ -104,7 +262,7 @@ const Chat = () => {
     await loadThreads();
     nav(`/app/chat/${data.id}`);
     setShowSidebar(false);
-  };
+  }, [user, loadThreads, nav]);
 
   const renameThread = async (id: string) => {
     const title = renameText.trim() || "Untitled";
@@ -146,16 +304,12 @@ const Chat = () => {
     return (data as any).text as string;
   };
 
-  const send = async (overrideText?: string, overrideFiles?: File[]) => {
-    if (!threadId || sending) return;
-    const text = (overrideText ?? input).trim();
-    const files = overrideFiles ?? pendingFiles;
-    if (!text && files.length === 0) return;
-
+  // Stable send handler for Composer
+  const handleSend = useCallback(async (text: string, files: File[]) => {
+    if (!threadId) return;
     setSending(true);
     try {
       const imgRefs = files.length ? await uploadFiles(files) : [];
-      // Sign for preview
       for (const r of imgRefs) {
         const { data: s } = await supabase.storage.from("chat-uploads").createSignedUrl(r.path, 3600);
         if (s?.signedUrl) r.url = s.signedUrl;
@@ -166,13 +320,10 @@ const Chat = () => {
       const userMsg: Msg = {
         id: inserted!.id, role: "user", content: text, images: imgRefs, created_at: inserted!.created_at,
       };
-      const next = [...messages, userMsg];
+      const next = [...messagesRef.current, userMsg];
       setMessages(next);
-      setInput("");
-      setPendingFiles([]);
 
-      const reply = await callAI(next);
-      // Refresh from DB to get the assistant row id
+      await callAI(next);
       const { data: latest } = await supabase.from("chat_messages")
         .select("id,role,content,images,created_at")
         .eq("thread_id", threadId).order("created_at", { ascending: true });
@@ -190,47 +341,39 @@ const Chat = () => {
       toast.error(e.message || "Failed to send");
     } finally {
       setSending(false);
-      setTimeout(() => taRef.current?.focus(), 50);
     }
-  };
+  }, [threadId, user, loadThreads]);
 
-  const deleteMsg = async (id: string) => {
+  const deleteMsg = useCallback(async (id: string) => {
     await supabase.from("chat_messages").delete().eq("id", id);
-    setMessages(messages.filter(m => m.id !== id));
-  };
+    setMessages(prev => prev.filter(m => m.id !== id));
+  }, []);
 
-  const saveEdit = async (id: string) => {
+  const saveEdit = useCallback(async (id: string) => {
     await supabase.from("chat_messages").update({ content: editText }).eq("id", id);
-    setMessages(messages.map(m => m.id === id ? { ...m, content: editText } : m));
+    setMessages(prev => prev.map(m => m.id === id ? { ...m, content: editText } : m));
     setEditingId(null);
-  };
+  }, [editText]);
 
-  const resend = async (id: string) => {
-    const idx = messages.findIndex(m => m.id === id);
+  const resend = useCallback(async (id: string) => {
+    const msgs = messagesRef.current;
+    const idx = msgs.findIndex(m => m.id === id);
     if (idx < 0) return;
-    const m = messages[idx];
-    // Delete this user msg + any messages after it, then re-send
-    const toDelete = messages.slice(idx).map(x => x.id);
+    const m = msgs[idx];
+    const toDelete = msgs.slice(idx).map(x => x.id);
     await supabase.from("chat_messages").delete().in("id", toDelete);
-    setMessages(messages.slice(0, idx));
-    await send(m.content, []);
-  };
+    setMessages(msgs.slice(0, idx));
+    await handleSend(m.content, []);
+  }, [handleSend]);
 
-  const copyMsg = (m: Msg) => {
+  const copyMsg = useCallback((m: Msg) => {
     navigator.clipboard.writeText(m.content);
     setCopiedId(m.id);
     setTimeout(() => setCopiedId(null), 1200);
-  };
+  }, []);
 
-  const onFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
-    setPendingFiles(prev => [...prev, ...files]);
-    if (fileRef.current) fileRef.current.value = "";
-  };
-
-  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
-  };
+  const startEdit = useCallback((m: Msg) => { setEditingId(m.id); setEditText(m.content); }, []);
+  const cancelEdit = useCallback(() => setEditingId(null), []);
 
   const activeThread = useMemo(() => threads.find(t => t.id === threadId), [threads, threadId]);
 
@@ -288,11 +431,9 @@ const Chat = () => {
   return (
     <AppShell>
       <div className="flex h-[calc(100vh-49px)] md:h-screen">
-        {/* Threads sidebar - desktop */}
         <aside className="hidden lg:flex w-72 border-r border-border bg-card/30">
           {Sidebar}
         </aside>
-        {/* Mobile drawer */}
         {showSidebar && (
           <div className="fixed inset-0 z-40 lg:hidden">
             <div className="absolute inset-0 bg-background/80" onClick={() => setShowSidebar(false)} />
@@ -302,7 +443,6 @@ const Chat = () => {
           </div>
         )}
 
-        {/* Chat area */}
         <div className="flex-1 flex flex-col min-w-0">
           <div className="flex items-center gap-2 px-4 py-3 border-b border-border bg-background/60 backdrop-blur">
             <Button variant="ghost" size="icon" className="lg:hidden" onClick={() => setShowSidebar(true)}>
@@ -317,66 +457,24 @@ const Chat = () => {
               {messages.length === 0 && !sending && (
                 <div className="text-center py-20">
                   <div className="text-2xl font-bold mb-2">Ask anything. Drop any images.</div>
-                  <p className="text-muted-foreground">Powered by your own Gemini key — unlimited and free.</p>
+                  <p className="text-muted-foreground">Your chats are saved — the AI remembers this conversation.</p>
                 </div>
               )}
               {messages.map(m => (
-                <div key={m.id} className={cn("group", m.role === "user" ? "flex justify-end" : "")}>
-                  <div className={cn(
-                    "max-w-[85%] rounded-2xl px-4 py-3",
-                    m.role === "user"
-                      ? "bg-primary text-primary-foreground font-medium"
-                      : "bg-card border border-border"
-                  )}>
-                    {m.images?.length > 0 && (
-                      <div className="flex flex-wrap gap-2 mb-2">
-                        {m.images.map((img, i) => (
-                          <a key={i} href={img.url} target="_blank" rel="noreferrer">
-                            <img src={img.url} alt="" className="max-h-48 rounded-lg border border-border/40" loading="lazy" />
-                          </a>
-                        ))}
-                      </div>
-                    )}
-                    {editingId === m.id ? (
-                      <div className="space-y-2">
-                        <Textarea value={editText} onChange={e => setEditText(e.target.value)} className="bg-background text-foreground" rows={3} />
-                        <div className="flex gap-2">
-                          <Button size="sm" onClick={() => saveEdit(m.id)}>Save</Button>
-                          <Button size="sm" variant="ghost" onClick={() => setEditingId(null)}>Cancel</Button>
-                        </div>
-                      </div>
-                    ) : m.role === "assistant" ? (
-                      <div className="prose prose-invert prose-sm max-w-none font-medium prose-strong:font-bold prose-headings:font-bold prose-p:leading-relaxed">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content || "*(empty)*"}</ReactMarkdown>
-                      </div>
-                    ) : (
-                      <div className="whitespace-pre-wrap leading-relaxed">{m.content}</div>
-                    )}
-                  </div>
-                  {editingId !== m.id && (
-                    <div className={cn(
-                      "flex gap-1 opacity-0 group-hover:opacity-100 transition self-end mb-1",
-                      m.role === "user" ? "order-first mr-2" : "ml-2"
-                    )}>
-                      <button onClick={() => copyMsg(m)} className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground" title="Copy">
-                        {copiedId === m.id ? <Check className="w-3.5 h-3.5 text-success" /> : <Copy className="w-3.5 h-3.5" />}
-                      </button>
-                      {m.role === "user" && (
-                        <>
-                          <button onClick={() => { setEditingId(m.id); setEditText(m.content); }} className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground" title="Edit">
-                            <Pencil className="w-3.5 h-3.5" />
-                          </button>
-                          <button onClick={() => resend(m.id)} className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground" title="Resend">
-                            <RefreshCw className="w-3.5 h-3.5" />
-                          </button>
-                        </>
-                      )}
-                      <button onClick={() => deleteMsg(m.id)} className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-destructive" title="Delete">
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  )}
-                </div>
+                <MessageBubble
+                  key={m.id}
+                  m={m}
+                  editingId={editingId}
+                  editText={editText}
+                  copiedId={copiedId}
+                  onCopy={copyMsg}
+                  onStartEdit={startEdit}
+                  onSaveEdit={saveEdit}
+                  onCancelEdit={cancelEdit}
+                  onEditTextChange={setEditText}
+                  onResend={resend}
+                  onDelete={deleteMsg}
+                />
               ))}
               {sending && (
                 <div className="flex items-center gap-2 text-muted-foreground text-sm">
@@ -386,44 +484,7 @@ const Chat = () => {
             </div>
           </ScrollArea>
 
-          {/* Composer */}
-          <div className="border-t border-border bg-background/80 backdrop-blur p-3">
-            <div className="max-w-3xl mx-auto">
-              {pendingFiles.length > 0 && (
-                <div className="flex flex-wrap gap-2 mb-2">
-                  {pendingFiles.map((f, i) => (
-                    <div key={i} className="relative">
-                      <img src={URL.createObjectURL(f)} alt="" className="h-16 w-16 object-cover rounded-md border border-border" />
-                      <button onClick={() => setPendingFiles(pendingFiles.filter((_, j) => j !== i))}
-                        className="absolute -top-1 -right-1 bg-destructive text-destructive-foreground rounded-full p-0.5">
-                        <X className="w-3 h-3" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-              <div className="flex gap-2 items-end">
-                <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={onFilePick} />
-                <Button variant="outline" size="icon" onClick={() => fileRef.current?.click()} title="Attach images" disabled={sending}>
-                  <ImageIcon className="w-4 h-4" />
-                </Button>
-                <Textarea
-                  ref={taRef}
-                  value={input} onChange={e => setInput(e.target.value)} onKeyDown={onKeyDown}
-                  placeholder="Type your message… (Shift+Enter for new line)"
-                  rows={1} className="flex-1 resize-none max-h-40 font-medium text-base"
-                  disabled={sending}
-                />
-                <Button onClick={() => send()} disabled={sending || (!input.trim() && pendingFiles.length === 0)}
-                  className="bg-gradient-to-r from-primary to-secondary text-primary-foreground">
-                  {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                </Button>
-              </div>
-              <p className="text-[10px] text-muted-foreground mt-1.5 text-center">
-                Uses your own Gemini key — no Lovable credits used.
-              </p>
-            </div>
-          </div>
+          <Composer sending={sending} onSend={handleSend} />
         </div>
       </div>
 
