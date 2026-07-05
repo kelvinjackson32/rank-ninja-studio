@@ -129,13 +129,13 @@ const MessageBubble = memo(function MessageBubble({
   return (
     <div className={cn("group", m.role === "user" ? "flex justify-end" : "")}>
       <div className={cn(
-        "max-w-[85%] rounded-2xl px-4 py-3",
+        "max-w-[85%] rounded-2xl px-4 py-3 sm:px-5 sm:py-4",
         m.role === "user"
           ? "bg-primary text-primary-foreground font-medium"
-          : "bg-card border border-border"
+          : "bg-card border border-border shadow-sm"
       )}>
         {m.images?.length > 0 && (
-          <div className="flex flex-wrap gap-2 mb-2">
+          <div className="flex flex-wrap gap-2 mb-3">
             {m.images.map((img, i) => (
               <a key={i} href={img.url} target="_blank" rel="noreferrer">
                 <img src={img.url} alt="" className="max-h-48 rounded-lg border border-border/40" loading="lazy" />
@@ -152,11 +152,26 @@ const MessageBubble = memo(function MessageBubble({
             </div>
           </div>
         ) : m.role === "assistant" ? (
-          <div className="prose prose-invert prose-sm max-w-none font-medium prose-strong:font-bold prose-headings:font-bold prose-p:leading-relaxed">
+          <div className={cn(
+            "prose prose-invert prose-sm sm:prose-base max-w-none",
+            "text-[15px] sm:text-base leading-[1.75] tracking-[0.005em]",
+            "prose-p:my-3 prose-p:leading-[1.75]",
+            "prose-headings:font-extrabold prose-headings:tracking-tight",
+            "prose-h1:text-xl prose-h1:mt-5 prose-h1:mb-3",
+            "prose-h2:text-lg prose-h2:mt-5 prose-h2:mb-2",
+            "prose-h3:text-base prose-h3:mt-4 prose-h3:mb-2",
+            "prose-strong:font-bold prose-strong:text-foreground",
+            "prose-ul:my-3 prose-ol:my-3 prose-li:my-1.5 prose-li:leading-[1.7] marker:text-primary",
+            "prose-blockquote:border-l-primary prose-blockquote:italic prose-blockquote:my-3",
+            "prose-code:bg-muted prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:text-[13px] prose-code:before:content-none prose-code:after:content-none",
+            "prose-pre:bg-muted prose-pre:border prose-pre:border-border prose-pre:rounded-lg prose-pre:my-3",
+            "prose-hr:my-5 prose-hr:border-border",
+            "prose-a:text-primary prose-a:underline-offset-2"
+          )}>
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content || "*(empty)*"}</ReactMarkdown>
           </div>
         ) : (
-          <div className="whitespace-pre-wrap leading-relaxed">{m.content}</div>
+          <div className="whitespace-pre-wrap leading-[1.7] text-[15px] sm:text-base break-words">{m.content}</div>
         )}
       </div>
       {editingId !== m.id && (
