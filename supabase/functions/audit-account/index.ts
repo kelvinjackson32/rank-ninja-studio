@@ -14,15 +14,17 @@ type ScrapeResult = {
 
 const FIVERR_BLOCKED_PATTERNS = /access denied|captcha|robot|unusual traffic|enable javascript|page not found|not available|sorry, we couldn't find|log in to fiverr|join fiverr/i;
 
-function canonicalUrl(raw: string): string {
+function canonicalUrl(raw: string | undefined | null): string {
+  const value = (raw || "").trim();
+  if (!value) return "";
   try {
-    const url = new URL(raw.startsWith("http") ? raw : `https://www.fiverr.com/${raw.replace(/^@/, "")}`);
+    const url = new URL(value.startsWith("http") ? value : `https://www.fiverr.com/${value.replace(/^@/, "")}`);
     url.hash = "";
     url.search = "";
     url.pathname = url.pathname.replace(/\/+$/, "");
     return url.toString();
   } catch {
-    return raw.trim();
+    return value;
   }
 }
 
@@ -360,7 +362,7 @@ Deno.serve(async (req) => {
     const niche: string | undefined = body.niche?.trim();
     const issue: string | undefined = body.issue?.trim();
     const gigUrls: string[] = Array.isArray(body.gigUrls)
-      ? body.gigUrls.map((u: string) => canonicalUrl(u?.trim())).filter(Boolean)
+      ? body.gigUrls.map((u: string) => canonicalUrl(u)).filter(Boolean)
       : (body.gigUrl?.trim() ? [canonicalUrl(body.gigUrl.trim())] : []);
 
     if (!profileUrl && gigUrls.length === 0) {
