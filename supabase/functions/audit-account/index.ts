@@ -409,7 +409,9 @@ Deno.serve(async (req) => {
     const profileAuditPromise = profileUrl
       ? (profileScrape
         ? (hasTimeFor(requestStart, 26_000)
-          ? auditOne({ niche, issue, profile: profileScrape, geminiKey, timeoutMs: Math.min(32_000, msLeft(requestStart, 18_000)) })
+          ? auditOne({ niche, issue, profile: profileScrape, geminiKey, timeoutMs: Math.min(32_000, msLeft(requestStart, 18_000)) }).catch((e: any) =>
+            unavailableAudit("PROFILE", profileUrl, `Audit generation took too long or failed: ${e.message}`)
+          )
           : Promise.resolve(unavailableAudit("PROFILE", profileUrl, "The audit stopped before the backend timeout. Re-run with fewer gig links or paste one gig URL at a time for a deeper audit.")))
         : Promise.resolve(unavailableAudit("PROFILE", profileUrl, "The Fiverr profile was not found or Fiverr returned a blocked/empty page to the scraper.")))
       : Promise.resolve(null);
