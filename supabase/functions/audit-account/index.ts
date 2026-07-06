@@ -5,6 +5,132 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+type ScrapeResult = {
+  url: string;
+  markdown: string;
+  metadata: any;
+  source: "apify" | "firecrawl";
+};
+
+const FIVERR_BLOCKED_PATTERNS = /access denied|captcha|robot|unusual traffic|enable javascript|page not found|not available|sorry, we couldn't find|log in to fiverr|join fiverr/i;
+
+function canonicalUrl(raw: string): string {
+  try {
+    const url = new URL(raw.startsWith("http") ? raw : `https://www.fiverr.com/${raw.replace(/^@/, "")}`);
+    url.hash = "";
+    url.search = "";
+    url.pathname = url.pathname.replace(/\/+$/, "");
+    return url.toString();
+  } catch {
+    return raw.trim();
+  }
+}
+
+function normalizeProfileInput(raw?: string): string | undefined {
+  const value = (raw || "").trim();
+  if (!value) return undefined;
+  if (!/^https?:\/\//i.test(value) && !value.includes("/")) {
+    return `https://www.fiverr.com/${value.replace(/^@/, "")}`;
+  }
+  return canonicalUrl(value);
+}
+
+function getFiverrUsername(raw?: string): string | null {
+  if (!raw) return null;
+  try {
+    const url = new URL(raw.startsWith("http") ? raw : `https://www.fiverr.com/${raw}`);
+    const [username] = url.pathname.split("/").filter(Boolean);
+    if (!username || ["categories", "search", "gigs", "users", "support", "inbox"].includes(username.toLowerCase())) return null;
+    return username;
+  } catch {
+    return null;
+  }
+}
+
+function isLikelyGigUrl(raw: string, username?: string | null): boolean {
+  try {
+    const url = new URL(raw);
+    if (!/fiverr\.com$/i.test(url.hostname.replace(/^www\./, ""))) return false;
+    const parts = url.pathname.split("/").filter(Boolean);
+    if (parts.length < 2) return false;
+    if (username && parts[0].toLowerCase() !== username.toLowerCase()) return false;
+    const second = parts[1].toLowerCase();
+    return !["portfolio", "reviews", "about", "seller_dashboard", "users"].includes(second);
+  } catch {
+    return false;
+  }
+}
+
+function looksUsable(markdown: string): boolean {
+  const text = (markdown || "").trim();
+  if (text.length < 250) return false;
+  if (FIVERR_BLOCKED_PATTERNS.test(text) && text.length < 2500) return false;
+  return true;
+}
+
+function extractApifyMarkdown(item: any): string {
+  const meta = item?.metadata || {};
+  const chunks = [
+    meta.title && `Title: ${meta.title}`,
+    meta.description && `Meta description: ${meta.description}`,
+    item?.markdown,
+    item?.text,
+    item?.description,
+    item?.html && String(item.html).replace(/<[^>]+>/g, " "),
+  ].filter(Boolean);
+  return chunks.join("\n\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+async function apifyCrawl(startUrls: string[], opts: { maxCrawlDepth: number; maxPages: number }): Promise<ScrapeResult[]> {
+  const token = Deno.env.get("APIFY_API_TOKEN");
+  if (!token || startUrls.length === 0) return [];
+
+  const actor = (Deno.env.get("APIFY_FIVERR_ACTOR_ID") || "apify/website-content-crawler").replace("/", "~");
+  const resp = await fetch(`https://api.apify.com/v2/acts/${actor}/run-sync-get-dataset-items?token=${encodeURIComponent(token)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      startUrls: startUrls.map((url) => ({ url: canonicalUrl(url) })),
+      crawlerType: "playwright:firefox",
+      maxCrawlDepth: opts.maxCrawlDepth,
+      maxCrawlPages: opts.maxPages,
+      maxResults: opts.maxPages,
+      useSitemaps: false,
+      respectRobotsTxtFile: false,
+      proxyConfiguration: { useApifyProxy: true },
+      dynamicContentWaitSecs: 12,
+      requestTimeoutSecs: 45,
+      maxRequestRetries: 2,
+      maxSessionRotations: 8,
+      removeCookieWarnings: true,
+      blockMedia: true,
+      htmlTransformer: "none",
+      saveMarkdown: true,
+      removeElementsCssSelector: "script, style, noscript, svg, img[src^='data:']",
+    }),
+    signal: AbortSignal.timeout(95_000),
+  });
+
+  if (!resp.ok) {
+    const txt = await resp.text().catch(() => "");
+    console.error(`Apify ${resp.status}: ${txt.slice(0, 300)}`);
+    return [];
+  }
+
+  const data = await resp.json().catch(() => []);
+  const items = Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : []);
+  return items.map((item: any) => {
+    const metadata = item?.metadata || {};
+    const url = canonicalUrl(item?.url || item?.loadedUrl || item?.sourceUrl || metadata.sourceURL || "");
+    return {
+      url,
+      markdown: extractApifyMarkdown(item).slice(0, 20000),
+      metadata,
+      source: "apify" as const,
+    };
+  }).filter((item) => item.url && looksUsable(item.markdown));
+}
+
 // Try Firecrawl with retry. Fiverr aggressively blocks bots, so we attempt twice
 // with different waits, then gracefully give up so the audit still runs.
 async function firecrawlScrape(url: string): Promise<{ markdown: string; metadata: any } | null> {
@@ -47,6 +173,47 @@ async function firecrawlScrape(url: string): Promise<{ markdown: string; metadat
     }
   }
   return null;
+}
+
+async function scrapeSingle(url: string): Promise<ScrapeResult | null> {
+  const normalized = canonicalUrl(url);
+  const apify = await apifyCrawl([normalized], { maxCrawlDepth: 0, maxPages: 1 }).catch((e) => {
+    console.error("apify single error", normalized, (e as Error).message);
+    return [];
+  });
+  if (apify[0]) return apify[0];
+
+  const firecrawl = await firecrawlScrape(normalized);
+  if (firecrawl && looksUsable(firecrawl.markdown)) {
+    return { url: normalized, markdown: firecrawl.markdown, metadata: firecrawl.metadata, source: "firecrawl" };
+  }
+  return null;
+}
+
+function unavailableAudit(target: "PROFILE" | "GIG", url: string, reason: string) {
+  return {
+    overall_score: 0,
+    verdict: `${target === "PROFILE" ? "Profile" : "Gig"} could not be read from Fiverr, so no real setup audit was generated for this link.`,
+    strengths: [],
+    critical_issues: [{
+      area: "Live data access",
+      severity: "high",
+      problem: reason,
+      why_it_hurts: "Without the live Fiverr title, description, tags, packages, reviews, and profile text, the audit would be guessing instead of showing what to edit.",
+      fix: "Check that the URL is public and spelled correctly. If the page opens in your browser but still fails here, Fiverr is blocking automated access for that page; paste the gig/profile text into AI Chat for a manual audit.",
+    }],
+    rewrites: {},
+    action_plan: [{
+      step: 1,
+      action: "Open the Fiverr link in a private browser window to confirm buyers can see it publicly.",
+      expected_impact: "Confirms whether the account or gig is hidden, paused, removed, or blocked from public view.",
+      time_to_apply: "2 min",
+    }],
+    image_prompts: [],
+    _scraped: false,
+    _source: null,
+    _url: url,
+  };
 }
 
 async function callAI(prompt: string, system: string, geminiKey: string): Promise<string> {
@@ -109,20 +276,19 @@ const AUDIT_SHAPE = `{
 
 async function auditOne(opts: {
   niche?: string; issue?: string;
-  profile?: { url: string; markdown: string | null };
-  gig?: { url: string; markdown: string | null };
+  profile?: ScrapeResult | null;
+  gig?: ScrapeResult | null;
   geminiKey: string;
 }) {
   const target = opts.gig ? "GIG" : "PROFILE";
-  const url = opts.gig?.url || opts.profile?.url || "";
-  const markdown = opts.gig?.markdown || opts.profile?.markdown;
+  const item = opts.gig || opts.profile;
+  const url = item?.url || "";
+  const markdown = item?.markdown;
   const scraped = !!markdown;
 
   const system = `You are a Fiverr ranking expert who has reverse-engineered what makes top-1% sellers convert. Output ONLY valid JSON, no markdown fences, no commentary.`;
 
-  const scrapedBlock = scraped
-    ? `=== LIVE SCRAPED CONTENT (${url}) ===\n${markdown}\n`
-    : `=== NOTE: Fiverr blocked live scraping. Audit using the URL slug, niche, and reported problem. Produce a forensic audit assuming common ranking weaknesses for this niche, and write rewrites optimized for top-rank conversion. ===\nURL: ${url}\n`;
+  const scrapedBlock = `=== LIVE SCRAPED FIVERR CONTENT VIA ${item?.source?.toUpperCase() || "SCRAPER"} (${url}) ===\n${markdown}\n`;
 
   const prompt = `Audit this Fiverr ${target}. Return STRICT JSON ONLY (no fences) in this EXACT shape:
 ${AUDIT_SHAPE}
@@ -134,6 +300,8 @@ ${scrapedBlock}
 
 Rules:
 - Be brutally honest, specific, and actionable. No fluff.
+- Use the scraped Fiverr setup only. Mention the exact existing weak title/profile bio/description/package/image/trust signals you see before rewriting them.
+- Tell the seller exactly where to edit inside Fiverr: Profile headline/bio, Gig title, Gallery image, Search tags, Description, FAQ, Packages, Requirements, Pricing, Portfolio, or Reviews/trust.
 - Compare against top-ranking sellers in this niche.
 - Description rewrite MUST be 1000–1150 chars using the 5-section skeleton: ABOUT THIS GIG / WHAT YOU GET / WHY CHOOSE ME / WHAT I NEED FROM YOU / READY TO ORDER (CTA). Use line breaks, ✅ ✔️ 🔥 sparingly.
 - Profile bio rewrite 600–1000 chars, hooks first sentence, ends with CTA.
@@ -157,6 +325,7 @@ Rules:
     };
   }
   parsed._scraped = scraped;
+  parsed._source = item?.source || null;
   return parsed;
 }
 
