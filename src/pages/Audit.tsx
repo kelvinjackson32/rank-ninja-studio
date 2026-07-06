@@ -182,7 +182,7 @@ const Audit = () => {
             <span className="text-gradient">Fiverr Account Audit</span>
           </h1>
           <p className="text-sm md:text-base text-muted-foreground mt-3 max-w-2xl">
-            Paste your profile and every gig URL. We scrape them live, compare against top sellers, then rank which gig you should fix <span className="text-primary font-semibold">first</span> based on severity and growth impact.
+            Paste your Fiverr username, profile URL, or gig URLs. We use Apify first to inspect the live account setup, find public gigs, then show exactly what to edit and which gig to fix <span className="text-primary font-semibold">first</span>.
           </p>
         </div>
 
@@ -195,8 +195,8 @@ const Audit = () => {
           </CardHeader>
           <CardContent className="space-y-4">
             <div>
-              <label className="text-xs font-mono uppercase text-muted-foreground mb-1.5 block">Profile URL</label>
-              <Input placeholder="https://www.fiverr.com/yourusername" value={profileUrl} onChange={(e) => setProfileUrl(e.target.value)} />
+              <label className="text-xs font-mono uppercase text-muted-foreground mb-1.5 block">Fiverr username or profile URL</label>
+              <Input placeholder="yourusername or https://www.fiverr.com/yourusername" value={profileUrl} onChange={(e) => setProfileUrl(e.target.value)} />
             </div>
 
             <div>
@@ -219,7 +219,7 @@ const Audit = () => {
                   </div>
                 ))}
               </div>
-              <p className="text-xs text-muted-foreground mt-2">Tip: add every active gig — we'll rank them so you know which one to fix first.</p>
+              <p className="text-xs text-muted-foreground mt-2">Tip: add known gig links, or paste only the profile and Apify will try to discover public gigs automatically.</p>
             </div>
 
             <div className="grid md:grid-cols-2 gap-3">
@@ -234,9 +234,9 @@ const Audit = () => {
             </div>
 
             <Button onClick={run} disabled={loading} size="lg" className="w-full bg-gradient-to-r from-primary to-secondary text-primary-foreground font-semibold animate-pulse-glow">
-              {loading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Scraping & auditing live…</> : <><Sparkles className="w-4 h-4 mr-2" /> Run audit & rank gigs</>}
+              {loading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Apify is checking Fiverr live…</> : <><Sparkles className="w-4 h-4 mr-2" /> Run live audit & rank gigs</>}
             </Button>
-            {loading && <p className="text-xs text-muted-foreground text-center">This can take 30–60s — we're pulling each page from Fiverr and benchmarking it.</p>}
+            {loading && <p className="text-xs text-muted-foreground text-center">This can take 60–90s — Apify is opening Fiverr pages, finding gigs, then AI is checking what to edit.</p>}
           </CardContent>
         </Card>
 
@@ -252,9 +252,9 @@ const Audit = () => {
         {failedGigs.length > 0 && (
           <Card className="mb-4 border-destructive/40 bg-destructive/5">
             <CardContent className="p-3 text-sm">
-              <span className="font-semibold text-destructive">Fiverr blocked scraping for:</span>{" "}
+               <span className="font-semibold text-destructive">Could not read these Fiverr pages:</span>{" "}
               <span className="text-muted-foreground break-all">{failedGigs.join(", ")}</span>
-              <div className="text-xs text-muted-foreground mt-1">We still ran an AI audit using the URL + niche context.</div>
+               <div className="text-xs text-muted-foreground mt-1">These are marked as unreadable instead of guessing. Check that each link is public and spelled correctly.</div>
             </CardContent>
           </Card>
         )}
