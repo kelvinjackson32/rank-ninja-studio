@@ -216,6 +216,54 @@ export type Database = {
           },
         ]
       }
+      saved_audits: {
+        Row: {
+          blocked_note: string | null
+          created_at: string
+          failed_gigs: Json
+          gig_audits: Json
+          gig_urls: Json
+          id: string
+          issue: string | null
+          label: string
+          niche: string | null
+          profile_audit: Json | null
+          profile_url: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          blocked_note?: string | null
+          created_at?: string
+          failed_gigs?: Json
+          gig_audits?: Json
+          gig_urls?: Json
+          id?: string
+          issue?: string | null
+          label?: string
+          niche?: string | null
+          profile_audit?: Json | null
+          profile_url?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          blocked_note?: string | null
+          created_at?: string
+          failed_gigs?: Json
+          gig_audits?: Json
+          gig_urls?: Json
+          id?: string
+          issue?: string | null
+          label?: string
+          niche?: string | null
+          profile_audit?: Json | null
+          profile_url?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       user_ai_settings: {
         Row: {
           created_at: string

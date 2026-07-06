@@ -265,20 +265,26 @@ function safeParseJSON(raw: string): any {
 const AUDIT_SHAPE = `{
   "overall_score": <0-100>,
   "verdict": "<one-sentence diagnosis>",
+  "top_issues_summary": ["short bullet naming each critical issue affecting this account/gig"],
   "strengths": ["..."],
   "critical_issues": [
-    { "area": "Title|Tags|Description|Pricing|Images|Profile Bio|Skills|Packages|SEO|Trust", "severity": "high|medium|low", "problem": "...", "why_it_hurts": "...", "fix": "..." }
+    { "area": "Title|Tags|Gig Description|Profile Bio|Buyer Requirements|Pricing|Images|Packages|SEO|Ranking|Trust", "severity": "high|medium|low", "problem": "...", "why_it_hurts": "...", "fix": "..." }
   ],
   "rewrites": {
-    "title": { "current": "...", "improved": "...", "reason": "..." },
+    "gig_title": { "current": "...", "improved": "<NEW perfect Fiverr gig title, <= 80 chars, keyword-front-loaded, buyer-intent, high-CTR>", "reason": "..." },
     "tags": { "current": ["..."], "improved": ["..."], "reason": "..." },
-    "description": { "improved": "...", "reason": "..." },
-    "profile_bio": { "improved": "...", "reason": "..." },
-    "packages": { "improved": [{ "name": "Basic|Standard|Premium", "price": 0, "delivery_days": 0, "revisions": 0, "includes": ["..."] }], "reason": "..." },
-    "search_tags": { "improved": ["..."], "reason": "..." }
+    "search_tags": { "improved": ["..."], "reason": "..." },
+    "gig_description": { "current_snippet": "...", "improved": "<NEW gig-specific description, 1000-1200 chars, 5 sections: ABOUT THIS GIG / WHAT YOU GET / WHY CHOOSE ME / MY PROCESS / READY TO ORDER (CTA). Use line breaks and ✅ sparingly. Must be about the GIG offering, NOT the seller bio.>", "reason": "..." },
+    "profile_description": { "current_snippet": "...", "improved": "<NEW profile bio, 600-900 chars, first-person, hooks in first line, positions the SELLER (skills, experience, results), ends with CTA to order. Different from the gig description.>", "reason": "..." },
+    "buyer_requirements": { "improved": ["<clear question 1 to ask the buyer before starting>", "<question 2>", "<question 3>", "<question 4>", "<question 5>"], "reason": "why these requirements reduce revisions and speed delivery" },
+    "packages": { "improved": [{ "name": "Basic|Standard|Premium", "price": 0, "delivery_days": 0, "revisions": 0, "includes": ["..."] }], "reason": "..." }
   },
+  "ranking_tips": ["specific Fiverr ranking action (SEO tags, first 24h impressions, response rate, delivery time, buyer requests, promoted gigs, video, portfolio, niche-down) — 5 to 8 tips"],
+  "account_edits": [
+    { "where_to_edit": "Profile → Description | Gig → Overview → Title | Gig → Description | Gig → Gallery | Gig → Requirements | Gig → Pricing | Profile → Skills | Profile → Languages", "what_to_change": "...", "priority": "high|medium|low" }
+  ],
   "action_plan": [{ "step": 1, "action": "...", "expected_impact": "...", "time_to_apply": "5 min" }],
-  "image_prompts": [{ "slot": "Thumbnail 1|2|3", "prompt": "1280x769 detailed prompt..." }]
+  "image_prompts": [{ "slot": "Thumbnail 1|2|3", "prompt": "<PREMIUM 1280x769 Fiverr gig thumbnail prompt. Must include: bold subject centered/left, high contrast background, 2-4 word overlay hook, brand color accent, professional lighting, mock UI or product visible, buyer-benefit-driven text, no watermark, sharp typography (bold sans-serif). Optimized for top-1% CTR>" }]
 }`;
 
 async function auditOne(opts: {
@@ -308,13 +314,15 @@ ${scrapedBlock}
 
 Rules:
 - Be brutally honest, specific, and actionable. No fluff.
-- Use the scraped Fiverr setup only. Mention the exact existing weak title/profile bio/description/package/image/trust signals you see before rewriting them.
-- Tell the seller exactly where to edit inside Fiverr: Profile headline/bio, Gig title, Gallery image, Search tags, Description, FAQ, Packages, Requirements, Pricing, Portfolio, or Reviews/trust.
-- Compare against top-ranking sellers in this niche.
-- Description rewrite MUST be 1000–1150 chars using the 5-section skeleton: ABOUT THIS GIG / WHAT YOU GET / WHY CHOOSE ME / WHAT I NEED FROM YOU / READY TO ORDER (CTA). Use line breaks, ✅ ✔️ 🔥 sparingly.
-- Profile bio rewrite 600–1000 chars, hooks first sentence, ends with CTA.
-- 5 search tags max, each <20 chars, lowercase, ranking-keyword-stuffed.
-- 3 thumbnail prompts, each 1280x769, niche-specific, high CTR (bold subject, contrast, 2–4 word overlay text).
+- Use the ACTUAL scraped Fiverr setup. Quote the exact existing weak title / bio / description / package / image / trust signal you see, THEN rewrite it.
+- rewrites.gig_title MUST be a NEW perfect gig title (never repeat the current one).
+- rewrites.gig_description is about the GIG service (what buyer gets). rewrites.profile_description is about the SELLER (bio). They must be clearly different.
+- rewrites.buyer_requirements = the questions to ask buyer at order start, tailored to this niche.
+- top_issues_summary = 3-6 short bullets naming the biggest issues affecting this account (used as visible warning chips).
+- account_edits = concrete list of "go here → change this" edits inside Fiverr, ordered by priority.
+- ranking_tips = Fiverr-specific SEO/ranking moves (impressions, CTR, response rate, delivery, buyer requests, promoted gigs, video, niche-down).
+- 3 image_prompts, each PREMIUM 1280x769, high-CTR, buyer-magnet quality — assume the current thumbnail is weak unless clearly stated otherwise.
+- 5 search tags max, each <20 chars, lowercase.
 - 5–8 critical_issues, mix of severities, each with concrete fix.
 - 3–6 action_plan steps, ordered by impact, with realistic time estimates.`;
 
@@ -453,7 +461,7 @@ Deno.serve(async (req) => {
       .sort((a, b) => b.priority - a.priority)
       .map((g, i) => ({ ...g, rank: i + 1 }));
 
-    return new Response(JSON.stringify({
+    const responsePayload = {
       success: true,
       profileAudit,
       gigAudits: ranked,
@@ -463,7 +471,31 @@ Deno.serve(async (req) => {
         ? "Apify was used first to inspect the Fiverr profile/gigs. Some pages still could not be found or read publicly, so those items are marked clearly instead of generating a guessed audit."
         : null,
       audit: profileAudit || ranked[0]?.audit || null,
-    }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    };
+
+    // Persist so the user can re-open the audit later from the saved list.
+    try {
+      const label = username
+        ? `@${username}`
+        : (ranked[0]?.title || gigUrls[0] || profileUrl || "Fiverr audit").toString().slice(0, 80);
+      const { data: saved } = await admin.from("saved_audits").insert({
+        user_id: user.id,
+        label,
+        profile_url: profileUrl || null,
+        gig_urls: allRequestedGigUrls,
+        niche: niche || null,
+        issue: issue || null,
+        profile_audit: profileAudit,
+        gig_audits: ranked,
+        failed_gigs: failedGigs,
+        blocked_note: responsePayload.blockedNote,
+      }).select("id").maybeSingle();
+      (responsePayload as any).savedId = saved?.id || null;
+    } catch (e) {
+      console.error("save audit error", (e as Error).message);
+    }
+
+    return new Response(JSON.stringify(responsePayload), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (e: any) {
     console.error("audit error", e);
     return new Response(JSON.stringify({ error: e.message || "Audit failed" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });

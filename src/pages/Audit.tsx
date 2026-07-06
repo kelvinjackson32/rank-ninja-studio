@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,20 +9,37 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import {
   Stethoscope, Loader2, AlertTriangle, CheckCircle2, Wrench, Copy, Sparkles,
-  Plus, X, Flame, TrendingUp, ExternalLink, Trophy,
+  Plus, X, Flame, TrendingUp, ExternalLink, Trophy, History, Trash2, RefreshCw, Target, Pencil, Image as ImageIcon,
 } from "lucide-react";
 
 type Issue = { area: string; severity: string; problem: string; why_it_hurts: string; fix: string };
+type AccountEdit = { where_to_edit: string; what_to_change: string; priority: string };
 type Audit = {
   overall_score: number;
   verdict: string;
+  top_issues_summary?: string[];
   strengths: string[];
   critical_issues: Issue[];
   rewrites: any;
+  ranking_tips?: string[];
+  account_edits?: AccountEdit[];
   action_plan: { step: number; action: string; expected_impact: string; time_to_apply: string }[];
   image_prompts: { slot: string; prompt: string }[];
 };
 type RankedGig = { url: string; title: string; audit: Audit; priority: number; high: number; med: number; low: number; score: number; rank: number };
+type SavedAudit = {
+  id: string;
+  label: string;
+  profile_url: string | null;
+  gig_urls: string[];
+  niche: string | null;
+  issue: string | null;
+  profile_audit: Audit | null;
+  gig_audits: RankedGig[];
+  failed_gigs: string[];
+  blocked_note: string | null;
+  created_at: string;
+};
 
 const sevColor = (s: string) =>
   s === "high" ? "bg-destructive/15 text-destructive border-destructive/30"
@@ -37,11 +54,34 @@ const copy = (v: any) => {
   toast({ title: "Copied" });
 };
 
+const RewriteBlock = ({ label, current, improved, reason }: { label: string; current?: string; improved: string; reason?: string }) => (
+  <div className="border border-border rounded-lg p-3 bg-card/40">
+    <div className="flex items-center justify-between mb-1.5">
+      <div className="font-semibold text-sm flex items-center gap-2"><Pencil className="w-3.5 h-3.5 text-primary" />{label}</div>
+      <Button variant="ghost" size="sm" onClick={() => copy(improved)}><Copy className="w-3.5 h-3.5 mr-1" />Copy</Button>
+    </div>
+    {current && <div className="text-xs text-muted-foreground mb-1.5"><span className="font-mono">CURRENT:</span> {current}</div>}
+    <pre className="text-sm whitespace-pre-wrap bg-muted/30 p-2.5 rounded font-sans leading-relaxed">{improved}</pre>
+    {reason && <div className="text-xs text-muted-foreground mt-2">💡 {reason}</div>}
+  </div>
+);
+
 const AuditReport = ({ audit }: { audit: Audit }) => (
-  <div className="space-y-4">
+  <div className="space-y-5">
+    {audit.top_issues_summary && audit.top_issues_summary.length > 0 && (
+      <div>
+        <div className="font-mono text-xs uppercase text-destructive mb-2 flex items-center gap-2"><AlertTriangle className="w-4 h-4" /> Issues affecting this account</div>
+        <div className="flex flex-wrap gap-1.5">
+          {audit.top_issues_summary.map((t, i) => (
+            <Badge key={i} variant="outline" className="bg-destructive/10 text-destructive border-destructive/30 whitespace-normal text-left leading-snug py-1">{t}</Badge>
+          ))}
+        </div>
+      </div>
+    )}
+
     {audit.critical_issues?.length > 0 && (
       <div>
-        <div className="font-mono text-xs uppercase text-warning mb-2 flex items-center gap-2"><AlertTriangle className="w-4 h-4" /> Issues hurting this gig</div>
+        <div className="font-mono text-xs uppercase text-warning mb-2 flex items-center gap-2"><AlertTriangle className="w-4 h-4" /> Critical issues (with fixes)</div>
         <div className="space-y-2">
           {audit.critical_issues.map((it, i) => (
             <div key={i} className="border border-border rounded-lg p-3 bg-card/40">
@@ -55,6 +95,82 @@ const AuditReport = ({ audit }: { audit: Audit }) => (
             </div>
           ))}
         </div>
+      </div>
+    )}
+
+    {audit.account_edits && audit.account_edits.length > 0 && (
+      <div>
+        <div className="font-mono text-xs uppercase text-primary mb-2 flex items-center gap-2"><Target className="w-4 h-4" /> Where to edit inside Fiverr</div>
+        <div className="space-y-2">
+          {audit.account_edits.map((e, i) => (
+            <div key={i} className="border border-border rounded-lg p-3 bg-card/40 flex gap-2 items-start">
+              <Badge variant="outline" className={sevColor(e.priority)}>{e.priority}</Badge>
+              <div className="flex-1">
+                <div className="font-mono text-xs text-primary">{e.where_to_edit}</div>
+                <div className="text-sm mt-0.5">{e.what_to_change}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    )}
+
+    {audit.rewrites && (
+      <div>
+        <div className="font-mono text-xs uppercase text-primary mb-2">Copy-paste rewrites</div>
+        <div className="space-y-2">
+          {audit.rewrites.gig_title?.improved && (
+            <RewriteBlock label="Gig title (new)" current={audit.rewrites.gig_title.current} improved={audit.rewrites.gig_title.improved} reason={audit.rewrites.gig_title.reason} />
+          )}
+          {audit.rewrites.gig_description?.improved && (
+            <RewriteBlock label="Gig description" current={audit.rewrites.gig_description.current_snippet} improved={audit.rewrites.gig_description.improved} reason={audit.rewrites.gig_description.reason} />
+          )}
+          {audit.rewrites.profile_description?.improved && (
+            <RewriteBlock label="Profile description" current={audit.rewrites.profile_description.current_snippet} improved={audit.rewrites.profile_description.improved} reason={audit.rewrites.profile_description.reason} />
+          )}
+          {audit.rewrites.buyer_requirements?.improved && (
+            <div className="border border-border rounded-lg p-3 bg-card/40">
+              <div className="flex items-center justify-between mb-1.5">
+                <div className="font-semibold text-sm flex items-center gap-2"><Pencil className="w-3.5 h-3.5 text-primary" />Buyer requirements</div>
+                <Button variant="ghost" size="sm" onClick={() => copy((audit.rewrites.buyer_requirements.improved || []).map((q: string, i: number) => `${i + 1}. ${q}`).join("\n"))}><Copy className="w-3.5 h-3.5 mr-1" />Copy</Button>
+              </div>
+              <ol className="text-sm space-y-1 list-decimal pl-5">
+                {(audit.rewrites.buyer_requirements.improved as string[]).map((q, i) => <li key={i}>{q}</li>)}
+              </ol>
+              {audit.rewrites.buyer_requirements.reason && <div className="text-xs text-muted-foreground mt-2">💡 {audit.rewrites.buyer_requirements.reason}</div>}
+            </div>
+          )}
+          {audit.rewrites.search_tags?.improved && (
+            <div className="border border-border rounded-lg p-3 bg-card/40">
+              <div className="flex items-center justify-between mb-1.5">
+                <div className="font-semibold text-sm">Search tags</div>
+                <Button variant="ghost" size="sm" onClick={() => copy((audit.rewrites.search_tags.improved || []).join(", "))}><Copy className="w-3.5 h-3.5 mr-1" />Copy</Button>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {(audit.rewrites.search_tags.improved as string[]).map((t, i) => <Badge key={i} variant="outline" className="bg-primary/10 text-primary border-primary/30">{t}</Badge>)}
+              </div>
+              {audit.rewrites.search_tags.reason && <div className="text-xs text-muted-foreground mt-2">💡 {audit.rewrites.search_tags.reason}</div>}
+            </div>
+          )}
+          {audit.rewrites.packages?.improved && (
+            <div className="border border-border rounded-lg p-3 bg-card/40">
+              <div className="flex items-center justify-between mb-1.5">
+                <div className="font-semibold text-sm">Packages</div>
+                <Button variant="ghost" size="sm" onClick={() => copy(audit.rewrites.packages.improved)}><Copy className="w-3.5 h-3.5 mr-1" />Copy</Button>
+              </div>
+              <pre className="text-xs whitespace-pre-wrap bg-muted/30 p-2.5 rounded font-mono leading-relaxed">{JSON.stringify(audit.rewrites.packages.improved, null, 2)}</pre>
+            </div>
+          )}
+        </div>
+      </div>
+    )}
+
+    {audit.ranking_tips && audit.ranking_tips.length > 0 && (
+      <div>
+        <div className="font-mono text-xs uppercase text-secondary mb-2 flex items-center gap-2"><TrendingUp className="w-4 h-4" /> Ranking tips</div>
+        <ul className="space-y-1 text-sm">
+          {audit.ranking_tips.map((t, i) => <li key={i} className="flex gap-2"><TrendingUp className="w-3.5 h-3.5 text-secondary mt-0.5 shrink-0" />{t}</li>)}
+        </ul>
       </div>
     )}
 
@@ -75,34 +191,9 @@ const AuditReport = ({ audit }: { audit: Audit }) => (
       </div>
     )}
 
-    {audit.rewrites && (
-      <div>
-        <div className="font-mono text-xs uppercase text-primary mb-2">Copy-paste rewrites</div>
-        <div className="space-y-2">
-          {Object.entries(audit.rewrites).map(([key, val]: [string, any]) => (
-            <div key={key} className="border border-border rounded-lg p-3 bg-card/40">
-              <div className="flex items-center justify-between mb-1.5">
-                <div className="font-semibold capitalize text-sm">{key.replace(/_/g, " ")}</div>
-                <Button variant="ghost" size="sm" onClick={() => copy(val.improved ?? val)}><Copy className="w-3.5 h-3.5 mr-1" />Copy</Button>
-              </div>
-              {val.current && (
-                <div className="text-xs text-muted-foreground mb-1.5">
-                  <span className="font-mono">CURRENT:</span> {Array.isArray(val.current) ? val.current.join(", ") : val.current}
-                </div>
-              )}
-              <pre className="text-sm whitespace-pre-wrap bg-muted/30 p-2.5 rounded font-sans">
-                {typeof val.improved === "string" ? val.improved : JSON.stringify(val.improved, null, 2)}
-              </pre>
-              {val.reason && <div className="text-xs text-muted-foreground mt-2">💡 {val.reason}</div>}
-            </div>
-          ))}
-        </div>
-      </div>
-    )}
-
     {audit.image_prompts?.length > 0 && (
       <div>
-        <div className="font-mono text-xs uppercase text-secondary mb-2">New thumbnail prompts</div>
+        <div className="font-mono text-xs uppercase text-secondary mb-2 flex items-center gap-2"><ImageIcon className="w-4 h-4" /> Premium thumbnail prompts (1280×769)</div>
         <div className="space-y-2">
           {audit.image_prompts.map((ip, i) => (
             <div key={i} className="border border-border rounded-lg p-3 bg-card/40">
@@ -110,7 +201,7 @@ const AuditReport = ({ audit }: { audit: Audit }) => (
                 <div className="font-semibold text-sm">{ip.slot}</div>
                 <Button variant="ghost" size="sm" onClick={() => copy(ip.prompt)}><Copy className="w-3.5 h-3.5 mr-1" />Copy</Button>
               </div>
-              <p className="text-sm text-muted-foreground">{ip.prompt}</p>
+              <p className="text-sm text-muted-foreground leading-relaxed">{ip.prompt}</p>
             </div>
           ))}
         </div>
@@ -138,10 +229,47 @@ const Audit = () => {
   const [ranked, setRanked] = useState<RankedGig[]>([]);
   const [failedGigs, setFailedGigs] = useState<string[]>([]);
   const [blockedNote, setBlockedNote] = useState<string | null>(null);
+  const [saved, setSaved] = useState<SavedAudit[]>([]);
+  const [currentId, setCurrentId] = useState<string | null>(null);
 
   const updateGig = (i: number, v: string) => setGigUrls((arr) => arr.map((u, idx) => (idx === i ? v : u)));
   const addGig = () => setGigUrls((arr) => [...arr, ""]);
   const removeGig = (i: number) => setGigUrls((arr) => arr.filter((_, idx) => idx !== i));
+
+  const loadSaved = async () => {
+    const { data, error } = await (supabase as any)
+      .from("saved_audits")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(50);
+    if (error) { console.error(error); return; }
+    setSaved((data as SavedAudit[]) || []);
+  };
+
+  useEffect(() => { loadSaved(); }, []);
+
+  const openSaved = (s: SavedAudit) => {
+    setCurrentId(s.id);
+    setProfileUrl(s.profile_url || "");
+    setGigUrls(s.gig_urls?.length ? s.gig_urls : [""]);
+    setNiche(s.niche || "");
+    setIssue(s.issue || "");
+    setProfileAudit(s.profile_audit || null);
+    setRanked(s.gig_audits || []);
+    setFailedGigs(s.failed_gigs || []);
+    setBlockedNote(s.blocked_note || null);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const deleteSaved = async (id: string) => {
+    const { error } = await (supabase as any).from("saved_audits").delete().eq("id", id);
+    if (error) { toast({ title: "Delete failed", description: error.message, variant: "destructive" }); return; }
+    setSaved((arr) => arr.filter((s) => s.id !== id));
+    if (currentId === id) {
+      setCurrentId(null); setProfileAudit(null); setRanked([]); setFailedGigs([]); setBlockedNote(null);
+    }
+    toast({ title: "Audit deleted" });
+  };
 
   const run = async () => {
     const cleanGigs = gigUrls.map((u) => u.trim()).filter(Boolean);
@@ -149,7 +277,7 @@ const Audit = () => {
       toast({ title: "Add a Fiverr URL", description: "Paste your profile URL and/or one or more gig URLs.", variant: "destructive" });
       return;
     }
-    setLoading(true); setProfileAudit(null); setRanked([]); setFailedGigs([]); setBlockedNote(null);
+    setLoading(true); setProfileAudit(null); setRanked([]); setFailedGigs([]); setBlockedNote(null); setCurrentId(null);
     try {
       const { data, error } = await supabase.functions.invoke("audit-account", {
         body: { profileUrl, gigUrls: cleanGigs, niche, issue },
@@ -160,7 +288,9 @@ const Audit = () => {
       setRanked(data.gigAudits || []);
       setFailedGigs(data.failedGigs || []);
       setBlockedNote(data.blockedNote || null);
-      toast({ title: "Audit complete", description: `${(data.gigAudits || []).length} gig${(data.gigAudits || []).length === 1 ? "" : "s"} ranked by priority.` });
+      setCurrentId(data.savedId || null);
+      await loadSaved();
+      toast({ title: "Audit complete & saved", description: `${(data.gigAudits || []).length} gig${(data.gigAudits || []).length === 1 ? "" : "s"} ranked. Find it in Saved audits.` });
     } catch (e: any) {
       toast({ title: "Audit failed", description: e.message, variant: "destructive" });
     } finally {
@@ -182,9 +312,36 @@ const Audit = () => {
             <span className="text-gradient">Fiverr Account Audit</span>
           </h1>
           <p className="text-sm md:text-base text-muted-foreground mt-3 max-w-2xl">
-            Paste your Fiverr username, profile URL, or gig URLs. We use Apify first to inspect the live account setup, find public gigs, then show exactly what to edit and which gig to fix <span className="text-primary font-semibold">first</span>.
+            Paste your Fiverr username, profile URL, or gig URLs. Apify inspects the live setup, then AI gives you a brand-new gig title, gig description, profile bio, buyer requirements, ranking tips and premium 1280×769 thumbnail prompts — <span className="text-primary font-semibold">every audit is saved</span> so you can reopen it later.
           </p>
         </div>
+
+        {/* Saved audits */}
+        {saved.length > 0 && (
+          <Card className="mb-6 border-border/60 surface-card">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-lg flex items-center gap-2">
+                <History className="w-5 h-5 text-primary" /> Saved audits ({saved.length})
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-2 md:grid-cols-2">
+                {saved.map((s) => (
+                  <div key={s.id} className={`border rounded-lg p-3 flex items-center gap-2 bg-card/40 ${currentId === s.id ? "border-primary/60" : "border-border"}`}>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-semibold text-sm truncate">{s.label}</div>
+                      <div className="text-xs text-muted-foreground truncate">
+                        {new Date(s.created_at).toLocaleString()} · {s.gig_urls?.length || 0} gig{(s.gig_urls?.length || 0) === 1 ? "" : "s"}
+                      </div>
+                    </div>
+                    <Button variant="ghost" size="sm" onClick={() => openSaved(s)}><RefreshCw className="w-3.5 h-3.5 mr-1" />Open</Button>
+                    <Button variant="ghost" size="icon" onClick={() => deleteSaved(s.id)} className="text-destructive hover:text-destructive"><Trash2 className="w-4 h-4" /></Button>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Input panel */}
         <Card className="mb-6 border-primary/30 surface-card">
@@ -234,9 +391,9 @@ const Audit = () => {
             </div>
 
             <Button onClick={run} disabled={loading} size="lg" className="w-full bg-gradient-to-r from-primary to-secondary text-primary-foreground font-semibold animate-pulse-glow">
-              {loading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Apify is checking Fiverr live…</> : <><Sparkles className="w-4 h-4 mr-2" /> Run live audit & rank gigs</>}
+              {loading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Apify is checking Fiverr live…</> : <><Sparkles className="w-4 h-4 mr-2" /> Run live audit & save</>}
             </Button>
-            {loading && <p className="text-xs text-muted-foreground text-center">This can take 60–90s — Apify is opening Fiverr pages, finding gigs, then AI is checking what to edit.</p>}
+            {loading && <p className="text-xs text-muted-foreground text-center">This can take 60–90s — Apify opens Fiverr pages, then AI writes new title, description, bio, requirements & image prompts.</p>}
           </CardContent>
         </Card>
 
