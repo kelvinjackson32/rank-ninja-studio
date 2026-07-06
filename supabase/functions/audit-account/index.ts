@@ -461,7 +461,7 @@ Deno.serve(async (req) => {
       .sort((a, b) => b.priority - a.priority)
       .map((g, i) => ({ ...g, rank: i + 1 }));
 
-    return new Response(JSON.stringify({
+    const responsePayload = {
       success: true,
       profileAudit,
       gigAudits: ranked,
@@ -471,7 +471,31 @@ Deno.serve(async (req) => {
         ? "Apify was used first to inspect the Fiverr profile/gigs. Some pages still could not be found or read publicly, so those items are marked clearly instead of generating a guessed audit."
         : null,
       audit: profileAudit || ranked[0]?.audit || null,
-    }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    };
+
+    // Persist so the user can re-open the audit later from the saved list.
+    try {
+      const label = username
+        ? `@${username}`
+        : (ranked[0]?.title || gigUrls[0] || profileUrl || "Fiverr audit").toString().slice(0, 80);
+      const { data: saved } = await admin.from("saved_audits").insert({
+        user_id: user.id,
+        label,
+        profile_url: profileUrl || null,
+        gig_urls: allRequestedGigUrls,
+        niche: niche || null,
+        issue: issue || null,
+        profile_audit: profileAudit,
+        gig_audits: ranked,
+        failed_gigs: failedGigs,
+        blocked_note: responsePayload.blockedNote,
+      }).select("id").maybeSingle();
+      (responsePayload as any).savedId = saved?.id || null;
+    } catch (e) {
+      console.error("save audit error", (e as Error).message);
+    }
+
+    return new Response(JSON.stringify(responsePayload), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (e: any) {
     console.error("audit error", e);
     return new Response(JSON.stringify({ error: e.message || "Audit failed" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
