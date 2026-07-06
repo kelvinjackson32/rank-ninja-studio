@@ -355,36 +355,58 @@ Deno.serve(async (req) => {
     }
 
     const body = await req.json();
-    const profileUrl: string | undefined = body.profileUrl?.trim();
+    const profileUrl: string | undefined = normalizeProfileInput(body.profileUrl);
+    const username = getFiverrUsername(profileUrl);
     const niche: string | undefined = body.niche?.trim();
     const issue: string | undefined = body.issue?.trim();
     const gigUrls: string[] = Array.isArray(body.gigUrls)
-      ? body.gigUrls.map((u: string) => u?.trim()).filter(Boolean)
-      : (body.gigUrl?.trim() ? [body.gigUrl.trim()] : []);
+      ? body.gigUrls.map((u: string) => canonicalUrl(u?.trim())).filter(Boolean)
+      : (body.gigUrl?.trim() ? [canonicalUrl(body.gigUrl.trim())] : []);
 
     if (!profileUrl && gigUrls.length === 0) {
       return new Response(JSON.stringify({ error: "Provide a profile URL and/or one or more gig URLs." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // Cap gigs to avoid timeout (Edge functions have hard limits)
-    const cappedGigs = gigUrls.slice(0, 6);
-    const skippedGigs = gigUrls.slice(6);
+    // First let Apify crawl the profile page. This can discover public gig links that
+    // Fiverr hides from simple HTTP scrapers, then every missing direct gig gets a focused scrape.
+    const profileCrawl = profileUrl
+      ? await apifyCrawl([profileUrl], { maxCrawlDepth: 1, maxPages: 14 }).catch((e) => {
+        console.error("apify profile crawl error", (e as Error).message);
+        return [] as ScrapeResult[];
+      })
+      : [];
 
-    // Scrape everything in parallel — failures return null and we still audit.
-    const profilePromise = profileUrl ? firecrawlScrape(profileUrl) : Promise.resolve(null);
-    const gigPromises = cappedGigs.map((u) => firecrawlScrape(u).then((r) => ({ url: u, r })));
-    const [profileScrape, gigScrapes] = await Promise.all([profilePromise, Promise.all(gigPromises)]);
+    const profileScrape = profileUrl
+      ? (profileCrawl.find((item) => !isLikelyGigUrl(item.url, username) && getFiverrUsername(item.url)?.toLowerCase() === username?.toLowerCase())
+        || await scrapeSingle(profileUrl))
+      : null;
+
+    const discoveredGigUrls = profileCrawl
+      .filter((item) => isLikelyGigUrl(item.url, username))
+      .map((item) => canonicalUrl(item.url));
+
+    const allGigUrls = Array.from(new Set([...gigUrls, ...discoveredGigUrls])).slice(0, 6);
+    const skippedGigs = Array.from(new Set([...gigUrls, ...discoveredGigUrls])).slice(6);
+
+    const gigScrapes = await Promise.all(allGigUrls.map(async (url) => {
+      const fromProfileCrawl = profileCrawl.find((item) => canonicalUrl(item.url) === canonicalUrl(url));
+      const r = fromProfileCrawl || await scrapeSingle(url);
+      return { url, r };
+    }));
 
     const failedGigs = gigScrapes.filter((g) => !g.r).map((g) => g.url);
 
-    // Audit profile + gigs in parallel; even blocked URLs still get an AI audit.
     const profileAuditPromise = profileUrl
-      ? auditOne({ niche, issue, profile: { url: profileUrl, markdown: profileScrape?.markdown || null }, geminiKey })
+      ? (profileScrape
+        ? auditOne({ niche, issue, profile: profileScrape, geminiKey })
+        : Promise.resolve(unavailableAudit("PROFILE", profileUrl, "The Fiverr profile was not found or Fiverr returned a blocked/empty page to the scraper.")))
       : Promise.resolve(null);
 
     const gigAuditPromises = gigScrapes.map(async (g) => {
       try {
-        const audit = await auditOne({ niche, issue, gig: { url: g.url, markdown: g.r?.markdown || null }, geminiKey });
+        const audit = g.r
+          ? await auditOne({ niche, issue, gig: g.r, geminiKey })
+          : unavailableAudit("GIG", g.url, "The Fiverr gig was not found, paused/private, misspelled, or blocked by Fiverr before Apify/Firecrawl could read its setup.");
         const title = g.r?.metadata?.title || g.url.split("/").pop() || g.url;
         return { url: g.url, title, audit };
       } catch (e: any) {
@@ -421,8 +443,8 @@ Deno.serve(async (req) => {
       gigAudits: ranked,
       failedGigs,
       skippedGigs,
-      blockedNote: failedGigs.length > 0
-        ? "Fiverr blocked live scraping for some URLs. The AI audit ran on the URL + niche context — results are still actionable but copy-check against the live page."
+      blockedNote: failedGigs.length > 0 || (profileUrl && !profileScrape) || (profileUrl && allGigUrls.length === 0)
+        ? "Apify was used first to inspect the Fiverr profile/gigs. Some pages still could not be found or read publicly, so those items are marked clearly instead of generating a guessed audit."
         : null,
       audit: profileAudit || ranked[0]?.audit || null,
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
