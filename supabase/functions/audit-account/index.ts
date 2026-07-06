@@ -12,6 +12,11 @@ type ScrapeResult = {
   source: "apify" | "firecrawl";
 };
 
+const FUNCTION_DEADLINE_MS = 132_000;
+const startedAt = () => Date.now();
+const msLeft = (start: number, reserve = 8_000) => Math.max(1_000, FUNCTION_DEADLINE_MS - (Date.now() - start) - reserve);
+const hasTimeFor = (start: number, ms: number) => msLeft(start, 0) > ms;
+
 const FIVERR_BLOCKED_PATTERNS = /access denied|captcha|robot|unusual traffic|enable javascript|page not found|not available|sorry, we couldn't find|log in to fiverr|join fiverr/i;
 
 function canonicalUrl(raw: string | undefined | null): string {
@@ -83,7 +88,7 @@ function extractApifyMarkdown(item: any): string {
   return chunks.join("\n\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
-async function apifyCrawl(startUrls: string[], opts: { maxCrawlDepth: number; maxPages: number }): Promise<ScrapeResult[]> {
+async function apifyCrawl(startUrls: string[], opts: { maxCrawlDepth: number; maxPages: number; timeoutMs?: number }): Promise<ScrapeResult[]> {
   const token = Deno.env.get("APIFY_API_TOKEN");
   if (!token || startUrls.length === 0) return [];
 
@@ -100,17 +105,17 @@ async function apifyCrawl(startUrls: string[], opts: { maxCrawlDepth: number; ma
       useSitemaps: false,
       respectRobotsTxtFile: false,
       proxyConfiguration: { useApifyProxy: true },
-      dynamicContentWaitSecs: 12,
-      requestTimeoutSecs: 45,
-      maxRequestRetries: 2,
-      maxSessionRotations: 8,
+      dynamicContentWaitSecs: 6,
+      requestTimeoutSecs: 24,
+      maxRequestRetries: 1,
+      maxSessionRotations: 4,
       removeCookieWarnings: true,
       blockMedia: true,
       htmlTransformer: "none",
       saveMarkdown: true,
       removeElementsCssSelector: "script, style, noscript, svg, img[src^='data:']",
     }),
-    signal: AbortSignal.timeout(95_000),
+    signal: AbortSignal.timeout(opts.timeoutMs || 42_000),
   });
 
   if (!resp.ok) {
@@ -135,7 +140,7 @@ async function apifyCrawl(startUrls: string[], opts: { maxCrawlDepth: number; ma
 
 // Try Firecrawl with retry. Fiverr aggressively blocks bots, so we attempt twice
 // with different waits, then gracefully give up so the audit still runs.
-async function firecrawlScrape(url: string): Promise<{ markdown: string; metadata: any } | null> {
+async function firecrawlScrape(url: string, timeoutMs = 22_000): Promise<{ markdown: string; metadata: any } | null> {
   const key = Deno.env.get("FIRECRAWL_API_KEY");
   if (!key) {
     console.warn("FIRECRAWL_API_KEY missing — skipping live scrape");
@@ -157,7 +162,7 @@ async function firecrawlScrape(url: string): Promise<{ markdown: string; metadat
           waitFor: opts.waitFor,
           location: { country: "US", languages: ["en"] },
         }),
-        signal: AbortSignal.timeout(45_000),
+        signal: AbortSignal.timeout(timeoutMs),
       });
       if (!resp.ok) {
         console.error(`Firecrawl ${resp.status} for ${url}`);
@@ -177,15 +182,15 @@ async function firecrawlScrape(url: string): Promise<{ markdown: string; metadat
   return null;
 }
 
-async function scrapeSingle(url: string): Promise<ScrapeResult | null> {
+async function scrapeSingle(url: string, timeoutMs = 34_000): Promise<ScrapeResult | null> {
   const normalized = canonicalUrl(url);
-  const apify = await apifyCrawl([normalized], { maxCrawlDepth: 0, maxPages: 1 }).catch((e) => {
+  const apify = await apifyCrawl([normalized], { maxCrawlDepth: 0, maxPages: 1, timeoutMs }).catch((e) => {
     console.error("apify single error", normalized, (e as Error).message);
     return [];
   });
   if (apify[0]) return apify[0];
 
-  const firecrawl = await firecrawlScrape(normalized);
+  const firecrawl = await firecrawlScrape(normalized, Math.min(18_000, timeoutMs));
   if (firecrawl && looksUsable(firecrawl.markdown)) {
     return { url: normalized, markdown: firecrawl.markdown, metadata: firecrawl.metadata, source: "firecrawl" };
   }
@@ -218,7 +223,7 @@ function unavailableAudit(target: "PROFILE" | "GIG", url: string, reason: string
   };
 }
 
-async function callAI(prompt: string, system: string, geminiKey: string): Promise<string> {
+async function callAI(prompt: string, system: string, geminiKey: string, timeoutMs = 45_000): Promise<string> {
   if (!geminiKey) {
     throw new Error("No Gemini API key configured. Open Settings → AI Generation and paste your Google Gemini API key.");
   }
@@ -231,7 +236,7 @@ async function callAI(prompt: string, system: string, geminiKey: string): Promis
       contents: [{ role: "user", parts: [{ text: prompt }] }],
       generationConfig: { temperature: 0.8, maxOutputTokens: 8192 },
     }),
-    signal: AbortSignal.timeout(90_000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   if (resp.status === 429) {
     const txt = await resp.text();
@@ -281,6 +286,7 @@ async function auditOne(opts: {
   profile?: ScrapeResult | null;
   gig?: ScrapeResult | null;
   geminiKey: string;
+  timeoutMs?: number;
 }) {
   const target = opts.gig ? "GIG" : "PROFILE";
   const item = opts.gig || opts.profile;
@@ -312,7 +318,7 @@ Rules:
 - 5–8 critical_issues, mix of severities, each with concrete fix.
 - 3–6 action_plan steps, ordered by impact, with realistic time estimates.`;
 
-  const raw = await callAI(prompt, system, opts.geminiKey);
+  const raw = await callAI(prompt, system, opts.geminiKey, opts.timeoutMs || 45_000);
   const parsed = safeParseJSON(raw);
   if (!parsed) {
     return {
@@ -335,6 +341,7 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
+    const requestStart = startedAt();
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
     const userClient = createClient(SUPABASE_URL, Deno.env.get("SUPABASE_ANON_KEY")!, {
       global: { headers: { Authorization: req.headers.get("Authorization") || "" } },
@@ -371,8 +378,8 @@ Deno.serve(async (req) => {
 
     // First let Apify crawl the profile page. This can discover public gig links that
     // Fiverr hides from simple HTTP scrapers, then every missing direct gig gets a focused scrape.
-    const profileCrawl = profileUrl
-      ? await apifyCrawl([profileUrl], { maxCrawlDepth: 1, maxPages: 14 }).catch((e) => {
+    const profileCrawl = profileUrl && hasTimeFor(requestStart, 42_000)
+      ? await apifyCrawl([profileUrl], { maxCrawlDepth: 1, maxPages: 8, timeoutMs: Math.min(38_000, msLeft(requestStart, 52_000)) }).catch((e) => {
         console.error("apify profile crawl error", (e as Error).message);
         return [] as ScrapeResult[];
       })
@@ -380,19 +387,20 @@ Deno.serve(async (req) => {
 
     const profileScrape = profileUrl
       ? (profileCrawl.find((item) => !isLikelyGigUrl(item.url, username) && getFiverrUsername(item.url)?.toLowerCase() === username?.toLowerCase())
-        || await scrapeSingle(profileUrl))
+        || (hasTimeFor(requestStart, 34_000) ? await scrapeSingle(profileUrl, Math.min(28_000, msLeft(requestStart, 58_000))) : null))
       : null;
 
     const discoveredGigUrls = profileCrawl
       .filter((item) => isLikelyGigUrl(item.url, username))
       .map((item) => canonicalUrl(item.url));
 
-    const allGigUrls = Array.from(new Set([...gigUrls, ...discoveredGigUrls])).slice(0, 6);
-    const skippedGigs = Array.from(new Set([...gigUrls, ...discoveredGigUrls])).slice(6);
+    const allRequestedGigUrls = Array.from(new Set([...gigUrls, ...discoveredGigUrls]));
+    const allGigUrls = allRequestedGigUrls.slice(0, 3);
+    const skippedGigs = allRequestedGigUrls.slice(3);
 
     const gigScrapes = await Promise.all(allGigUrls.map(async (url) => {
       const fromProfileCrawl = profileCrawl.find((item) => canonicalUrl(item.url) === canonicalUrl(url));
-      const r = fromProfileCrawl || await scrapeSingle(url);
+      const r = fromProfileCrawl || (hasTimeFor(requestStart, 30_000) ? await scrapeSingle(url, Math.min(26_000, msLeft(requestStart, 48_000))) : null);
       return { url, r };
     }));
 
@@ -400,14 +408,20 @@ Deno.serve(async (req) => {
 
     const profileAuditPromise = profileUrl
       ? (profileScrape
-        ? auditOne({ niche, issue, profile: profileScrape, geminiKey })
+        ? (hasTimeFor(requestStart, 26_000)
+          ? auditOne({ niche, issue, profile: profileScrape, geminiKey, timeoutMs: Math.min(32_000, msLeft(requestStart, 18_000)) }).catch((e: any) =>
+            unavailableAudit("PROFILE", profileUrl, `Audit generation took too long or failed: ${e.message}`)
+          )
+          : Promise.resolve(unavailableAudit("PROFILE", profileUrl, "The audit stopped before the backend timeout. Re-run with fewer gig links or paste one gig URL at a time for a deeper audit.")))
         : Promise.resolve(unavailableAudit("PROFILE", profileUrl, "The Fiverr profile was not found or Fiverr returned a blocked/empty page to the scraper.")))
       : Promise.resolve(null);
 
     const gigAuditPromises = gigScrapes.map(async (g) => {
       try {
         const audit = g.r
-          ? await auditOne({ niche, issue, gig: g.r, geminiKey })
+          ? (hasTimeFor(requestStart, 24_000)
+            ? await auditOne({ niche, issue, gig: g.r, geminiKey, timeoutMs: Math.min(30_000, msLeft(requestStart, 12_000)) })
+            : unavailableAudit("GIG", g.url, "The audit stopped before the backend timeout. Re-run this single gig URL for a deeper audit."))
           : unavailableAudit("GIG", g.url, "The Fiverr gig was not found, paused/private, misspelled, or blocked by Fiverr before Apify/Firecrawl could read its setup.");
         const title = g.r?.metadata?.title || g.url.split("/").pop() || g.url;
         return { url: g.url, title, audit };
