@@ -317,6 +317,143 @@ function serviceHintFromUrl(raw: string, niche?: string): string {
   }
 }
 
+function titleCase(value: string): string {
+  return value.replace(/\w\S*/g, (word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase());
+}
+
+function compactTitle(value: string, max = 78): string {
+  const clean = value.replace(/\s+/g, " ").trim();
+  return clean.length <= max ? clean : `${clean.slice(0, max - 1).trim()}`;
+}
+
+function heuristicAudit(target: "PROFILE" | "GIG", url: string, opts: { niche?: string; issue?: string; reason?: string }) {
+  const service = serviceHintFromUrl(url, opts.niche) || "Fiverr service";
+  const serviceTitle = titleCase(service);
+  const title = compactTitle(`I will create ${service} that helps buyers get results fast`);
+  const tags = Array.from(new Set(service.toLowerCase().split(/\s+/).filter((w) => w.length > 2).slice(0, 4).concat("expert"))).slice(0, 5);
+  const reason = opts.reason || "The live Fiverr page could not be fully verified before timeout, so this audit uses the URL/niche plus Fiverr ranking best practices.";
+
+  return {
+    overall_score: 38,
+    verdict: `${target === "PROFILE" ? "Profile" : "Gig"} needs clearer positioning, stronger buyer trust, and SEO-focused edits to improve ranking and orders.`,
+    top_issues_summary: [
+      "Live page could not be fully verified, so confirm the gig/profile is public",
+      "Title needs stronger buyer-intent keywords and a clearer result",
+      "Description should sell the outcome, process, proof, and next step",
+      "Requirements should collect buyer details before work starts",
+      "Thumbnail should be upgraded for higher click-through rate",
+    ],
+    strengths: [
+      `The service direction appears focused on ${serviceTitle}.`,
+      "The URL gives enough niche context to create a practical first rewrite.",
+    ],
+    critical_issues: [
+      {
+        area: "Live data access",
+        severity: "high",
+        problem: reason,
+        why_it_hurts: "If buyers or scrapers cannot reliably read the page, Fiverr ranking signals and audit accuracy both suffer.",
+        fix: "Open the profile/gig in a private browser window. If it is public, paste the exact current title, description, tags, packages, and profile bio into chat for a deeper line-by-line audit.",
+      },
+      {
+        area: "Title",
+        severity: "high",
+        problem: "The gig title likely does not lead with the strongest buyer-search phrase and outcome.",
+        why_it_hurts: "Weak titles reduce impressions, clicks, and relevance for Fiverr search.",
+        fix: `Use this tighter title: ${title}`,
+      },
+      {
+        area: "Gig Description",
+        severity: "high",
+        problem: "The description needs a clearer offer structure: result, deliverables, proof, process, and CTA.",
+        why_it_hurts: "Buyers leave when they cannot quickly understand what they get and why they should trust you.",
+        fix: "Replace the description with the copy-paste rewrite below and keep short readable sections.",
+      },
+      {
+        area: "Buyer Requirements",
+        severity: "medium",
+        problem: "Missing or weak requirements cause delays, revisions, and unclear expectations.",
+        why_it_hurts: "Late clarification hurts delivery speed, reviews, and repeat orders.",
+        fix: "Add the buyer questions below in Gig → Requirements before accepting work.",
+      },
+      {
+        area: "Images",
+        severity: "medium",
+        problem: "The thumbnail needs a premium, benefit-led design that stands out in Fiverr search.",
+        why_it_hurts: "Low click-through rate tells Fiverr buyers are not choosing the gig, which can reduce ranking momentum.",
+        fix: "Use one of the premium thumbnail prompts below to create a clean high-contrast 1280×769 gig image.",
+      },
+    ],
+    rewrites: {
+      gig_title: {
+        current: "Could not verify live current title",
+        improved: title,
+        reason: "It puts the service keyword and buyer result into one clear promise while staying within Fiverr title limits.",
+      },
+      tags: { current: [], improved: tags, reason: "Use focused lowercase tags that match likely buyer searches." },
+      search_tags: { improved: tags, reason: "Keep tags tightly matched to the main service instead of broad unrelated keywords." },
+      gig_description: {
+        current_snippet: "Could not verify live current description",
+        improved: `ABOUT THIS GIG\nI will help you with professional ${service} that is clear, polished, and built around your buyer goal. My focus is to deliver work that looks trustworthy, communicates fast, and helps you move from idea to finished result without confusion.\n\nWHAT YOU GET\n✅ A clean, ready-to-use ${service} deliverable\n✅ Strong attention to detail and buyer instructions\n✅ Clear communication before and during the order\n✅ Files/output prepared according to your package\n\nWHY CHOOSE ME\nI focus on quality, fast understanding, and practical results. I do not only complete the task — I make sure the final work fits your purpose, audience, and style.\n\nMY PROCESS\n1. I review your requirements\n2. I confirm the direction\n3. I create the work carefully\n4. I deliver and support revisions based on the package\n\nREADY TO ORDER?\nSend your details now and I will help you get a clean, professional result for your project.`,
+        reason: "This separates the offer into buyer-friendly sections, adds trust, explains the process, and ends with a clear CTA.",
+      },
+      profile_description: {
+        current_snippet: "Could not verify live current profile bio",
+        improved: `Hi, I’m a dedicated freelancer focused on helping buyers get professional ${service} results with clear communication and reliable delivery. I care about understanding your goal first, then creating work that is clean, useful, and ready for your project.\n\nI can help with planning, creating, improving, and polishing the work so it matches your brand, audience, and expectations. My priority is simple: make the process easy for you and deliver quality that can earn trust.\n\nMessage me before ordering if you want help choosing the right package or explaining your project details.`,
+        reason: "The profile bio sells the seller and trust, while the gig description sells the specific service deliverable.",
+      },
+      buyer_requirements: {
+        improved: [
+          `What exact ${service} result do you want me to create?`,
+          "Who is the target audience or end user?",
+          "Do you have brand colors, examples, references, or style preferences?",
+          "What files, text, links, images, or access do you want me to use?",
+          "What deadline and final format do you need?",
+        ],
+        reason: "These questions reduce confusion, prevent revisions, and help delivery start faster.",
+      },
+      packages: {
+        improved: [
+          { name: "Basic", price: 10, delivery_days: 3, revisions: 1, includes: ["Simple version", "Clear delivery", "Basic support"] },
+          { name: "Standard", price: 25, delivery_days: 4, revisions: 2, includes: ["More complete version", "Better detail", "Priority communication"] },
+          { name: "Premium", price: 50, delivery_days: 5, revisions: 3, includes: ["Best quality version", "Full polish", "Commercial-ready delivery"] },
+        ],
+        reason: "Three clear packages help buyers choose quickly and raise average order value.",
+      },
+    },
+    ranking_tips: [
+      "Put the main buyer keyword at the front of the title and repeat it naturally in the first paragraph.",
+      "Use all 5 search tags, but keep them narrow and directly related to the service.",
+      "Improve thumbnail CTR with 2–4 words of benefit text and one clear visual outcome.",
+      "Reply fast to every message because response time affects buyer trust and conversion.",
+      "Start with a focused niche before expanding to broader keywords.",
+      "Add portfolio examples or delivery samples so buyers can trust the quality before ordering.",
+    ],
+    account_edits: [
+      { where_to_edit: "Gig → Overview → Title", what_to_change: `Replace the title with: ${title}`, priority: "high" },
+      { where_to_edit: "Gig → Description", what_to_change: "Paste the new gig-specific description and format it with short sections.", priority: "high" },
+      { where_to_edit: "Gig → Requirements", what_to_change: "Add the buyer questions so every order starts with complete details.", priority: "high" },
+      { where_to_edit: "Gig → Gallery", what_to_change: "Replace weak thumbnails with a premium 1280×769 image using one prompt below.", priority: "medium" },
+      { where_to_edit: "Profile → Description", what_to_change: "Use the seller-focused profile bio, not the same text as the gig description.", priority: "medium" },
+    ],
+    action_plan: [
+      { step: 1, action: "Confirm the Fiverr link opens publicly in a private browser window.", expected_impact: "Removes hidden/private URL issues before editing.", time_to_apply: "2 min" },
+      { step: 2, action: "Update the gig title, tags, and first paragraph with the main keyword.", expected_impact: "Improves Fiverr search relevance and click clarity.", time_to_apply: "10 min" },
+      { step: 3, action: "Replace the gig description with the structured rewrite.", expected_impact: "Improves buyer trust and conversion.", time_to_apply: "15 min" },
+      { step: 4, action: "Add buyer requirements and adjust packages.", expected_impact: "Reduces revisions and increases order value.", time_to_apply: "15 min" },
+      { step: 5, action: "Create a stronger thumbnail and upload it to the gig gallery.", expected_impact: "Improves click-through rate from search results.", time_to_apply: "30 min" },
+    ],
+    image_prompts: [
+      { slot: "Thumbnail 1", prompt: `Premium 1280x769 Fiverr thumbnail for ${service}, bold centered subject, high contrast clean background, overlay text "PRO RESULTS", brand color accent, professional lighting, mock UI/product visible, sharp bold sans-serif typography, no watermark, top-1% CTR style` },
+      { slot: "Thumbnail 2", prompt: `Premium 1280x769 service thumbnail for ${service}, left-side expert workspace visual, right-side 3-word hook "FAST QUALITY WORK", bright accent color, clean modern layout, realistic deliverable preview, crisp typography, no watermark` },
+      { slot: "Thumbnail 3", prompt: `Premium 1280x769 Fiverr gig image for ${service}, before-and-after result composition, strong focal point, benefit text "READY TO USE", polished professional lighting, high trust design, bold sans-serif text, no watermark` },
+    ],
+    _scraped: false,
+    _source: "built-in-fallback",
+    _url: url,
+  };
+}
+
 async function fallbackAudit(target: "PROFILE" | "GIG", url: string, opts: { niche?: string; issue?: string; geminiKey: string; timeoutMs?: number }) {
   const serviceHint = serviceHintFromUrl(url, opts.niche);
   const system = `You are a Fiverr ranking expert. Output ONLY valid JSON, no markdown fences, no commentary.`;
@@ -350,7 +487,11 @@ Rules:
   } catch (e) {
     console.error("fallback audit error", url, (e as Error).message);
   }
-  return unavailableAudit(target, url, "Fiverr blocked automated reading and AI fallback failed. Check the public URL, then re-run or paste the account/gig text into chat.");
+  return heuristicAudit(target, url, {
+    niche: opts.niche,
+    issue: opts.issue,
+    reason: "Fiverr blocked automated reading or the AI provider could not generate right now, so built-in Fiverr best-practice recommendations were used.",
+  });
 }
 
 function extractGigUrlsFromScrape(scrape: ScrapeResult | null | undefined, username?: string | null): string[] {
