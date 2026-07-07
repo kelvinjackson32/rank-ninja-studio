@@ -192,7 +192,7 @@ async function apifyCrawl(startUrls: string[], opts: { maxCrawlDepth: number; ma
   const runUrl = new URL(`https://api.apify.com/v2/acts/${actor}/run-sync-get-dataset-items`);
   runUrl.searchParams.set("token", token);
   runUrl.searchParams.set("memory", "1024");
-  runUrl.searchParams.set("timeout", String(Math.max(20, Math.ceil((opts.timeoutMs || 30_000) / 1000))));
+  runUrl.searchParams.set("timeout", String(Math.max(8, Math.ceil((opts.timeoutMs || 10_000) / 1000))));
   const resp = await fetch(runUrl.toString(), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -205,9 +205,9 @@ async function apifyCrawl(startUrls: string[], opts: { maxCrawlDepth: number; ma
       useSitemaps: false,
       respectRobotsTxtFile: false,
       proxyConfiguration: { useApifyProxy: true },
-      dynamicContentWaitSecs: 3,
-      requestTimeoutSecs: 16,
-      maxRequestRetries: 1,
+      dynamicContentWaitSecs: 1,
+      requestTimeoutSecs: 8,
+      maxRequestRetries: 0,
       maxConcurrency: 1,
       maxSessionRotations: 4,
       removeCookieWarnings: true,
@@ -216,7 +216,7 @@ async function apifyCrawl(startUrls: string[], opts: { maxCrawlDepth: number; ma
       saveMarkdown: true,
       removeElementsCssSelector: "script, style, noscript, svg, img[src^='data:']",
     }),
-    signal: AbortSignal.timeout(opts.timeoutMs || 26_000),
+    signal: AbortSignal.timeout(opts.timeoutMs || 10_000),
   });
 
   if (!resp.ok) {
@@ -243,16 +243,13 @@ async function apifyCrawl(startUrls: string[], opts: { maxCrawlDepth: number; ma
 
 // Try Firecrawl with retry. Fiverr aggressively blocks bots, so we attempt twice
 // with different waits, then gracefully give up so the audit still runs.
-async function firecrawlScrape(url: string, timeoutMs = 12_000): Promise<{ markdown: string; metadata: any } | null> {
+async function firecrawlScrape(url: string, timeoutMs = 8_000): Promise<{ markdown: string; metadata: any } | null> {
   const key = Deno.env.get("FIRECRAWL_API_KEY");
   if (!key) {
     console.warn("FIRECRAWL_API_KEY missing — skipping live scrape");
     return null;
   }
-  const attempts = [
-    { waitFor: 4000, onlyMainContent: true },
-    { waitFor: 8000, onlyMainContent: false },
-  ];
+  const attempts = [{ waitFor: 1500, onlyMainContent: false }];
   for (const opts of attempts) {
     try {
       const resp = await fetch("https://api.firecrawl.dev/v2/scrape", {
@@ -288,19 +285,19 @@ async function firecrawlScrape(url: string, timeoutMs = 12_000): Promise<{ markd
 async function scrapeSingle(url: string, timeoutMs = 34_000): Promise<ScrapeResult | null> {
   const normalized = await resolveFiverrUrl(url);
 
-  const direct = await directFiverrScrape(normalized, Math.min(7_000, timeoutMs));
+  const direct = await directFiverrScrape(normalized, Math.min(5_000, timeoutMs));
   if (direct) return direct;
 
-  const apify = await apifyCrawl([normalized], { maxCrawlDepth: 0, maxPages: 1, timeoutMs: Math.min(18_000, timeoutMs) }).catch((e) => {
+  const firecrawl = await firecrawlScrape(normalized, Math.min(7_000, timeoutMs));
+  if (firecrawl && looksUsable(firecrawl.markdown)) {
+    return { url: normalized, markdown: firecrawl.markdown, metadata: firecrawl.metadata, source: "firecrawl" };
+  }
+
+  const apify = await apifyCrawl([normalized], { maxCrawlDepth: 0, maxPages: 1, timeoutMs: Math.min(8_000, timeoutMs) }).catch((e) => {
     console.error("apify single error", normalized, (e as Error).message);
     return [];
   });
   if (apify[0]) return apify[0];
-
-  const firecrawl = await firecrawlScrape(normalized, Math.min(12_000, timeoutMs));
-  if (firecrawl && looksUsable(firecrawl.markdown)) {
-    return { url: normalized, markdown: firecrawl.markdown, metadata: firecrawl.metadata, source: "firecrawl" };
-  }
   return null;
 }
 
