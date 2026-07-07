@@ -227,16 +227,18 @@ async function apifyCrawl(startUrls: string[], opts: { maxCrawlDepth: number; ma
 
   const data = await resp.json().catch(() => []);
   const items = Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : []);
-  return items.map((item: any) => {
-    const metadata = item?.metadata || {};
-    const url = canonicalUrl(item?.url || item?.loadedUrl || item?.sourceUrl || metadata.sourceURL || "");
-    return {
-      url,
-      markdown: extractApifyMarkdown(item).slice(0, 20000),
-      metadata: { ...metadata, links: item?.links || item?.urls || metadata.links || [] },
-      source: "apify" as const,
-    };
-  }).filter((item) => item.url && looksUsable(item.markdown));
+  return items
+    .map((item: any): ScrapeResult => {
+      const metadata = item?.metadata || {};
+      const url = canonicalUrl(item?.url || item?.loadedUrl || item?.sourceUrl || metadata.sourceURL || "");
+      return {
+        url,
+        markdown: extractApifyMarkdown(item).slice(0, 20000),
+        metadata: { ...metadata, links: item?.links || item?.urls || metadata.links || [] },
+        source: "apify" as const,
+      };
+    })
+    .filter((item: ScrapeResult) => item.url && looksUsable(item.markdown));
 }
 
 // Try Firecrawl with retry. Fiverr aggressively blocks bots, so we attempt twice
