@@ -553,8 +553,8 @@ Deno.serve(async (req) => {
       ? await directFiverrScrape(profileUrl, Math.min(7_000, msLeft(requestStart, 70_000)))
       : null;
 
-    const profileCrawl = profileUrl && hasTimeFor(requestStart, 28_000)
-      ? await apifyCrawl([profileUrl], { maxCrawlDepth: 1, maxPages: 6, timeoutMs: Math.min(24_000, msLeft(requestStart, 62_000)) }).catch((e) => {
+    const profileCrawl = profileUrl && !directProfileScrape && hasTimeFor(requestStart, 14_000)
+      ? await apifyCrawl([profileUrl], { maxCrawlDepth: 1, maxPages: 4, timeoutMs: Math.min(10_000, msLeft(requestStart, 72_000)) }).catch((e) => {
         console.error("apify profile crawl error", (e as Error).message);
         return [] as ScrapeResult[];
       })
@@ -563,7 +563,7 @@ Deno.serve(async (req) => {
     const profileScrape = profileUrl
       ? (directProfileScrape
         || profileCrawl.find((item) => !isLikelyGigUrl(item.url, username) && getFiverrUsername(item.url)?.toLowerCase() === username?.toLowerCase())
-        || (hasTimeFor(requestStart, 24_000) ? await scrapeSingle(profileUrl, Math.min(20_000, msLeft(requestStart, 54_000))) : null))
+        || (hasTimeFor(requestStart, 16_000) ? await scrapeSingle(profileUrl, Math.min(12_000, msLeft(requestStart, 62_000))) : null))
       : null;
 
     const discoveredGigUrls = Array.from(new Set([
@@ -578,7 +578,7 @@ Deno.serve(async (req) => {
 
     const gigScrapes = await Promise.all(allGigUrls.map(async (url) => {
       const fromProfileCrawl = profileCrawl.find((item) => canonicalUrl(item.url) === canonicalUrl(url));
-      const r = fromProfileCrawl || (hasTimeFor(requestStart, 20_000) ? await scrapeSingle(url, Math.min(18_000, msLeft(requestStart, 44_000))) : null);
+      const r = fromProfileCrawl || (hasTimeFor(requestStart, 12_000) ? await scrapeSingle(url, Math.min(10_000, msLeft(requestStart, 52_000))) : null);
       return { url, r };
     }));
 
