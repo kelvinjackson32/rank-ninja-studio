@@ -548,23 +548,30 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: "Provide a profile URL and/or one or more gig URLs." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // First let Apify crawl the profile page. This can discover public gig links that
-    // Fiverr hides from simple HTTP scrapers, then every missing direct gig gets a focused scrape.
-    const profileCrawl = profileUrl && hasTimeFor(requestStart, 42_000)
-      ? await apifyCrawl([profileUrl], { maxCrawlDepth: 1, maxPages: 8, timeoutMs: Math.min(38_000, msLeft(requestStart, 52_000)) }).catch((e) => {
+    // Use the fastest path first. Direct HTML often exposes the profile meta and gig links;
+    // Apify/Firecrawl are fallbacks, not blockers for the whole audit.
+    const directProfileScrape = profileUrl && hasTimeFor(requestStart, 10_000)
+      ? await directFiverrScrape(profileUrl, Math.min(7_000, msLeft(requestStart, 70_000)))
+      : null;
+
+    const profileCrawl = profileUrl && hasTimeFor(requestStart, 28_000)
+      ? await apifyCrawl([profileUrl], { maxCrawlDepth: 1, maxPages: 6, timeoutMs: Math.min(24_000, msLeft(requestStart, 62_000)) }).catch((e) => {
         console.error("apify profile crawl error", (e as Error).message);
         return [] as ScrapeResult[];
       })
       : [];
 
     const profileScrape = profileUrl
-      ? (profileCrawl.find((item) => !isLikelyGigUrl(item.url, username) && getFiverrUsername(item.url)?.toLowerCase() === username?.toLowerCase())
-        || (hasTimeFor(requestStart, 34_000) ? await scrapeSingle(profileUrl, Math.min(28_000, msLeft(requestStart, 58_000))) : null))
+      ? (directProfileScrape
+        || profileCrawl.find((item) => !isLikelyGigUrl(item.url, username) && getFiverrUsername(item.url)?.toLowerCase() === username?.toLowerCase())
+        || (hasTimeFor(requestStart, 24_000) ? await scrapeSingle(profileUrl, Math.min(20_000, msLeft(requestStart, 54_000))) : null))
       : null;
 
-    const discoveredGigUrls = profileCrawl
-      .filter((item) => isLikelyGigUrl(item.url, username))
-      .map((item) => canonicalUrl(item.url));
+    const discoveredGigUrls = Array.from(new Set([
+      ...extractGigUrlsFromScrape(directProfileScrape, username),
+      ...extractGigUrlsFromScrape(profileScrape, username),
+      ...profileCrawl.filter((item) => isLikelyGigUrl(item.url, username)).map((item) => canonicalUrl(item.url)),
+    ]));
 
     const allRequestedGigUrls = Array.from(new Set([...gigUrls, ...discoveredGigUrls]));
     const allGigUrls = allRequestedGigUrls.slice(0, 3);
@@ -572,7 +579,7 @@ Deno.serve(async (req) => {
 
     const gigScrapes = await Promise.all(allGigUrls.map(async (url) => {
       const fromProfileCrawl = profileCrawl.find((item) => canonicalUrl(item.url) === canonicalUrl(url));
-      const r = fromProfileCrawl || (hasTimeFor(requestStart, 30_000) ? await scrapeSingle(url, Math.min(26_000, msLeft(requestStart, 48_000))) : null);
+      const r = fromProfileCrawl || (hasTimeFor(requestStart, 20_000) ? await scrapeSingle(url, Math.min(18_000, msLeft(requestStart, 44_000))) : null);
       return { url, r };
     }));
 
@@ -580,21 +587,23 @@ Deno.serve(async (req) => {
 
     const profileAuditPromise = profileUrl
       ? (profileScrape
-        ? (hasTimeFor(requestStart, 26_000)
-          ? auditOne({ niche, issue, profile: profileScrape, geminiKey, timeoutMs: Math.min(32_000, msLeft(requestStart, 18_000)) }).catch((e: any) =>
-            unavailableAudit("PROFILE", profileUrl, `Audit generation took too long or failed: ${e.message}`)
+        ? (hasTimeFor(requestStart, 22_000)
+          ? auditOne({ niche, issue, profile: profileScrape, geminiKey, timeoutMs: Math.min(28_000, msLeft(requestStart, 20_000)) }).catch((e: any) =>
+            fallbackAudit("PROFILE", profileUrl, { niche, issue: `Audit generation failed after scrape: ${e.message}. ${issue || ""}`, geminiKey, timeoutMs: Math.min(24_000, msLeft(requestStart, 12_000)) })
           )
-          : Promise.resolve(unavailableAudit("PROFILE", profileUrl, "The audit stopped before the backend timeout. Re-run with fewer gig links or paste one gig URL at a time for a deeper audit.")))
-        : Promise.resolve(unavailableAudit("PROFILE", profileUrl, "The Fiverr profile was not found or Fiverr returned a blocked/empty page to the scraper.")))
+          : fallbackAudit("PROFILE", profileUrl, { niche, issue: `The live scrape used too much time. ${issue || ""}`, geminiKey, timeoutMs: Math.min(22_000, msLeft(requestStart, 12_000)) }))
+        : fallbackAudit("PROFILE", profileUrl, { niche, issue: `Fiverr profile could not be fully read by the scraper. ${issue || ""}`, geminiKey, timeoutMs: Math.min(24_000, msLeft(requestStart, 12_000)) }))
       : Promise.resolve(null);
 
     const gigAuditPromises = gigScrapes.map(async (g) => {
       try {
         const audit = g.r
-          ? (hasTimeFor(requestStart, 24_000)
-            ? await auditOne({ niche, issue, gig: g.r, geminiKey, timeoutMs: Math.min(30_000, msLeft(requestStart, 12_000)) })
-            : unavailableAudit("GIG", g.url, "The audit stopped before the backend timeout. Re-run this single gig URL for a deeper audit."))
-          : unavailableAudit("GIG", g.url, "The Fiverr gig was not found, paused/private, misspelled, or blocked by Fiverr before Apify/Firecrawl could read its setup.");
+          ? (hasTimeFor(requestStart, 20_000)
+            ? await auditOne({ niche, issue, gig: g.r, geminiKey, timeoutMs: Math.min(26_000, msLeft(requestStart, 12_000)) }).catch((e: any) =>
+              fallbackAudit("GIG", g.url, { niche, issue: `Live content was found but audit generation failed: ${e.message}. ${issue || ""}`, geminiKey, timeoutMs: Math.min(22_000, msLeft(requestStart, 8_000)) })
+            )
+            : await fallbackAudit("GIG", g.url, { niche, issue: `The scrape used too much time, so generate best-practice edits from the URL/niche. ${issue || ""}`, geminiKey, timeoutMs: Math.min(22_000, msLeft(requestStart, 8_000)) }))
+          : await fallbackAudit("GIG", g.url, { niche, issue: `Fiverr blocked or returned an empty gig page before Apify/Firecrawl could read its setup. ${issue || ""}`, geminiKey, timeoutMs: Math.min(22_000, msLeft(requestStart, 8_000)) });
         const title = g.r?.metadata?.title || g.url.split("/").pop() || g.url;
         return { url: g.url, title, audit };
       } catch (e: any) {
@@ -605,6 +614,7 @@ Deno.serve(async (req) => {
             overall_score: 0,
             verdict: `Audit error: ${e.message}`,
             strengths: [], critical_issues: [], rewrites: {}, action_plan: [], image_prompts: [],
+            _scraped: false,
           },
         };
       }
@@ -632,7 +642,7 @@ Deno.serve(async (req) => {
       failedGigs,
       skippedGigs,
       blockedNote: failedGigs.length > 0 || (profileUrl && !profileScrape) || (profileUrl && allGigUrls.length === 0)
-        ? "Apify was used first to inspect the Fiverr profile/gigs. Some pages still could not be found or read publicly, so those items are marked clearly instead of generating a guessed audit."
+        ? "The backend tried direct Fiverr reading first, then Apify and Firecrawl. Some live pages could not be fully verified, so the audit includes best-practice rewrites plus a warning to confirm public visibility."
         : null,
       audit: profileAudit || ranked[0]?.audit || null,
     };
