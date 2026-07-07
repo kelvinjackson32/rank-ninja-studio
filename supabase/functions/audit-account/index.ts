@@ -9,7 +9,7 @@ type ScrapeResult = {
   url: string;
   markdown: string;
   metadata: any;
-  source: "apify" | "firecrawl";
+  source: "direct" | "apify" | "firecrawl";
 };
 
 const FUNCTION_DEADLINE_MS = 132_000;
@@ -59,6 +59,7 @@ function isLikelyGigUrl(raw: string, username?: string | null): boolean {
     const url = new URL(raw);
     if (!/fiverr\.com$/i.test(url.hostname.replace(/^www\./, ""))) return false;
     const parts = url.pathname.split("/").filter(Boolean);
+    if (parts[0]?.toLowerCase() === "s" && parts[1]) return true;
     if (parts.length < 2) return false;
     if (username && parts[0].toLowerCase() !== username.toLowerCase()) return false;
     const second = parts[1].toLowerCase();
@@ -73,6 +74,101 @@ function looksUsable(markdown: string): boolean {
   if (text.length < 250) return false;
   if (FIVERR_BLOCKED_PATTERNS.test(text) && text.length < 2500) return false;
   return true;
+}
+
+function absoluteFiverrUrl(href: string, base = "https://www.fiverr.com") {
+  try {
+    return canonicalUrl(new URL(href.replace(/\\\//g, "/"), base).toString());
+  } catch {
+    return "";
+  }
+}
+
+function extractFiverrLinks(raw: string, baseUrl: string): string[] {
+  const found = new Set<string>();
+  const hrefRe = /href=["']([^"']+)["']/gi;
+  let m: RegExpExecArray | null;
+  while ((m = hrefRe.exec(raw))) {
+    const href = m[1];
+    if (href.includes("fiverr.com") || href.startsWith("/")) {
+      const url = absoluteFiverrUrl(href, baseUrl);
+      if (url) found.add(url);
+    }
+  }
+  const urlRe = /https?:\\?\/\\?\/(?:www\.)?fiverr\.com\\?\/[^\s"'<>\\)]+/gi;
+  while ((m = urlRe.exec(raw))) {
+    const url = absoluteFiverrUrl(m[0].replace(/\\\//g, "/"), baseUrl);
+    if (url) found.add(url);
+  }
+  return Array.from(found);
+}
+
+function extractMeta(html: string, key: string): string {
+  const re = new RegExp(`<meta[^>]+(?:name|property)=["']${key}["'][^>]+content=["']([^"']+)["'][^>]*>`, "i");
+  const alt = new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+(?:name|property)=["']${key}["'][^>]*>`, "i");
+  return (html.match(re)?.[1] || html.match(alt)?.[1] || "").replace(/&quot;/g, '"').replace(/&amp;/g, "&").trim();
+}
+
+function htmlToText(html: string): string {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+async function resolveFiverrUrl(raw: string, timeoutMs = 5_000): Promise<string> {
+  const normalized = canonicalUrl(raw);
+  try {
+    const url = new URL(normalized);
+    if (url.hostname.replace(/^www\./, "") !== "fiverr.com" || !url.pathname.startsWith("/s/")) return normalized;
+    const resp = await fetch(normalized, {
+      method: "GET",
+      redirect: "manual",
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/125 Safari/537.36",
+        "Accept-Language": "en-US,en;q=0.9",
+      },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    const location = resp.headers.get("location");
+    return location ? absoluteFiverrUrl(location, normalized) || normalized : normalized;
+  } catch {
+    return normalized;
+  }
+}
+
+async function directFiverrScrape(url: string, timeoutMs = 8_000): Promise<ScrapeResult | null> {
+  const normalized = canonicalUrl(url);
+  try {
+    const resp = await fetch(normalized, {
+      redirect: "follow",
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/125 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+      },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!resp.ok) return null;
+    const html = await resp.text();
+    const finalUrl = canonicalUrl(resp.url || normalized);
+    const title = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]?.replace(/\s+/g, " ").trim() || extractMeta(html, "og:title");
+    const description = extractMeta(html, "description") || extractMeta(html, "og:description");
+    const links = extractFiverrLinks(html, finalUrl);
+    const bodyText = htmlToText(html).slice(0, 18000);
+    const markdown = [`Title: ${title || ""}`, `Meta description: ${description || ""}`, bodyText].filter(Boolean).join("\n\n").trim();
+    if (!looksUsable(markdown)) return null;
+    return { url: finalUrl, markdown, metadata: { title, description, links, statusCode: resp.status }, source: "direct" };
+  } catch (e) {
+    console.error("direct fiverr error", normalized, (e as Error).message);
+    return null;
+  }
 }
 
 function extractApifyMarkdown(item: any): string {
@@ -93,7 +189,11 @@ async function apifyCrawl(startUrls: string[], opts: { maxCrawlDepth: number; ma
   if (!token || startUrls.length === 0) return [];
 
   const actor = (Deno.env.get("APIFY_FIVERR_ACTOR_ID") || "apify/website-content-crawler").replace("/", "~");
-  const resp = await fetch(`https://api.apify.com/v2/acts/${actor}/run-sync-get-dataset-items?token=${encodeURIComponent(token)}`, {
+  const runUrl = new URL(`https://api.apify.com/v2/acts/${actor}/run-sync-get-dataset-items`);
+  runUrl.searchParams.set("token", token);
+  runUrl.searchParams.set("memory", "1024");
+  runUrl.searchParams.set("timeout", String(Math.max(20, Math.ceil((opts.timeoutMs || 30_000) / 1000))));
+  const resp = await fetch(runUrl.toString(), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -105,9 +205,10 @@ async function apifyCrawl(startUrls: string[], opts: { maxCrawlDepth: number; ma
       useSitemaps: false,
       respectRobotsTxtFile: false,
       proxyConfiguration: { useApifyProxy: true },
-      dynamicContentWaitSecs: 6,
-      requestTimeoutSecs: 24,
+      dynamicContentWaitSecs: 3,
+      requestTimeoutSecs: 16,
       maxRequestRetries: 1,
+      maxConcurrency: 1,
       maxSessionRotations: 4,
       removeCookieWarnings: true,
       blockMedia: true,
@@ -115,7 +216,7 @@ async function apifyCrawl(startUrls: string[], opts: { maxCrawlDepth: number; ma
       saveMarkdown: true,
       removeElementsCssSelector: "script, style, noscript, svg, img[src^='data:']",
     }),
-    signal: AbortSignal.timeout(opts.timeoutMs || 42_000),
+    signal: AbortSignal.timeout(opts.timeoutMs || 26_000),
   });
 
   if (!resp.ok) {
@@ -132,7 +233,7 @@ async function apifyCrawl(startUrls: string[], opts: { maxCrawlDepth: number; ma
     return {
       url,
       markdown: extractApifyMarkdown(item).slice(0, 20000),
-      metadata,
+      metadata: { ...metadata, links: item?.links || item?.urls || metadata.links || [] },
       source: "apify" as const,
     };
   }).filter((item) => item.url && looksUsable(item.markdown));
@@ -140,7 +241,7 @@ async function apifyCrawl(startUrls: string[], opts: { maxCrawlDepth: number; ma
 
 // Try Firecrawl with retry. Fiverr aggressively blocks bots, so we attempt twice
 // with different waits, then gracefully give up so the audit still runs.
-async function firecrawlScrape(url: string, timeoutMs = 22_000): Promise<{ markdown: string; metadata: any } | null> {
+async function firecrawlScrape(url: string, timeoutMs = 12_000): Promise<{ markdown: string; metadata: any } | null> {
   const key = Deno.env.get("FIRECRAWL_API_KEY");
   if (!key) {
     console.warn("FIRECRAWL_API_KEY missing — skipping live scrape");
@@ -157,7 +258,7 @@ async function firecrawlScrape(url: string, timeoutMs = 22_000): Promise<{ markd
         headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
         body: JSON.stringify({
           url,
-          formats: ["markdown"],
+          formats: ["markdown", "links"],
           onlyMainContent: opts.onlyMainContent,
           waitFor: opts.waitFor,
           location: { country: "US", languages: ["en"] },
@@ -170,7 +271,7 @@ async function firecrawlScrape(url: string, timeoutMs = 22_000): Promise<{ markd
       }
       const data = await resp.json();
       const md: string = data.data?.markdown || data.markdown || "";
-      const meta = data.data?.metadata || data.metadata || {};
+      const meta = { ...(data.data?.metadata || data.metadata || {}), links: data.data?.links || data.links || [] };
       if (md && md.trim().length > 250) {
         return { markdown: md.slice(0, 16000), metadata: meta };
       }
@@ -183,18 +284,81 @@ async function firecrawlScrape(url: string, timeoutMs = 22_000): Promise<{ markd
 }
 
 async function scrapeSingle(url: string, timeoutMs = 34_000): Promise<ScrapeResult | null> {
-  const normalized = canonicalUrl(url);
-  const apify = await apifyCrawl([normalized], { maxCrawlDepth: 0, maxPages: 1, timeoutMs }).catch((e) => {
+  const normalized = await resolveFiverrUrl(url);
+
+  const direct = await directFiverrScrape(normalized, Math.min(7_000, timeoutMs));
+  if (direct) return direct;
+
+  const apify = await apifyCrawl([normalized], { maxCrawlDepth: 0, maxPages: 1, timeoutMs: Math.min(18_000, timeoutMs) }).catch((e) => {
     console.error("apify single error", normalized, (e as Error).message);
     return [];
   });
   if (apify[0]) return apify[0];
 
-  const firecrawl = await firecrawlScrape(normalized, Math.min(18_000, timeoutMs));
+  const firecrawl = await firecrawlScrape(normalized, Math.min(12_000, timeoutMs));
   if (firecrawl && looksUsable(firecrawl.markdown)) {
     return { url: normalized, markdown: firecrawl.markdown, metadata: firecrawl.metadata, source: "firecrawl" };
   }
   return null;
+}
+
+function serviceHintFromUrl(raw: string, niche?: string): string {
+  if (niche?.trim()) return niche.trim();
+  try {
+    const url = new URL(raw);
+    const parts = url.pathname.split("/").filter(Boolean);
+    const slug = parts[0]?.toLowerCase() === "s" ? parts[1] : parts[1] || parts[0] || raw;
+    return decodeURIComponent(slug)
+      .replace(/[-_]+/g, " ")
+      .replace(/\b(i|will|do|make|create|design|your|for|and|or|the|a|an)\b/gi, " ")
+      .replace(/\s+/g, " ")
+      .trim() || "Fiverr service";
+  } catch {
+    return niche || "Fiverr service";
+  }
+}
+
+async function fallbackAudit(target: "PROFILE" | "GIG", url: string, opts: { niche?: string; issue?: string; geminiKey: string; timeoutMs?: number }) {
+  const serviceHint = serviceHintFromUrl(url, opts.niche);
+  const system = `You are a Fiverr ranking expert. Output ONLY valid JSON, no markdown fences, no commentary.`;
+  const prompt = `Fiverr live scraping did not return enough readable content for this ${target}, but the user still needs an actionable audit to edit the account and win orders.
+
+Return STRICT JSON ONLY in this EXACT shape:
+${AUDIT_SHAPE}
+
+Target: ${target}
+URL: ${url}
+Likely service/niche from URL or user input: ${serviceHint}
+User-reported problem: ${opts.issue || "low impressions, low clicks, no orders"}
+
+Rules:
+- Be honest: include one high-priority issue that says the live Fiverr page could not be fully verified, so the user must confirm public visibility and paste exact text for a deeper line-by-line review.
+- Still provide a strong NEW gig title, gig description, profile description, buyer requirements, search tags, packages, account edits, ranking tips, action plan, and 3 premium 1280x769 thumbnail prompts.
+- Do NOT leave rewrites empty. Make them specific to the likely service/niche.
+- rewrites.gig_title must be <= 80 chars and must not copy the raw URL slug word-for-word.
+- rewrites.gig_description must be about the gig service. rewrites.profile_description must be about the seller bio. Keep them different.
+- account_edits must tell exactly where to edit inside Fiverr.
+- overall_score should reflect risk from missing live verification, usually 20-45 unless the URL/niche gives strong clarity.`;
+  try {
+    const raw = await callAI(prompt, system, opts.geminiKey, opts.timeoutMs || 28_000);
+    const parsed = safeParseJSON(raw);
+    if (parsed) {
+      parsed._scraped = false;
+      parsed._source = "fallback";
+      parsed._url = url;
+      return parsed;
+    }
+  } catch (e) {
+    console.error("fallback audit error", url, (e as Error).message);
+  }
+  return unavailableAudit(target, url, "Fiverr blocked automated reading and AI fallback failed. Check the public URL, then re-run or paste the account/gig text into chat.");
+}
+
+function extractGigUrlsFromScrape(scrape: ScrapeResult | null | undefined, username?: string | null): string[] {
+  if (!scrape) return [];
+  const links = Array.isArray(scrape.metadata?.links) ? scrape.metadata.links : [];
+  const fromMarkdown = extractFiverrLinks(scrape.markdown || "", scrape.url);
+  return Array.from(new Set([...links, ...fromMarkdown].map((u: string) => canonicalUrl(u)).filter((u: string) => isLikelyGigUrl(u, username))));
 }
 
 function unavailableAudit(target: "PROFILE" | "GIG", url: string, reason: string) {
