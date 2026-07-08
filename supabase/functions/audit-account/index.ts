@@ -12,7 +12,42 @@ type ScrapeResult = {
   source: "direct" | "apify" | "firecrawl";
 };
 
-const FUNCTION_DEADLINE_MS = 132_000;
+const FUNCTION_DEADLINE_MS = 140_000;
+
+type ApifyToken = { id: string | null; token: string; actor_id: string | null };
+
+async function loadApifyTokens(admin: any, userId: string): Promise<ApifyToken[]> {
+  const tokens: ApifyToken[] = [];
+  try {
+    const { data } = await admin
+      .from("api_keys")
+      .select("id, api_key, actor_id, status")
+      .eq("user_id", userId)
+      .eq("status", "active")
+      .order("last_used_at", { ascending: true, nullsFirst: true });
+    for (const row of (data || []) as any[]) {
+      if (row?.api_key) tokens.push({ id: row.id, token: String(row.api_key).trim(), actor_id: row.actor_id || null });
+    }
+  } catch (e) {
+    console.error("loadApifyTokens error", (e as Error).message);
+  }
+  const envToken = Deno.env.get("APIFY_API_TOKEN");
+  if (envToken) tokens.push({ id: null, token: envToken, actor_id: null });
+  // de-dupe by token
+  const seen = new Set<string>();
+  return tokens.filter((t) => (t.token && !seen.has(t.token) && (seen.add(t.token), true)));
+}
+
+async function markApifyKey(admin: any, id: string | null, status: string, error?: string) {
+  if (!id) return;
+  try {
+    await admin.from("api_keys").update({
+      status,
+      error_message: error ? String(error).slice(0, 500) : null,
+      last_used_at: new Date().toISOString(),
+    }).eq("id", id);
+  } catch (_) { /* ignore */ }
+}
 const startedAt = () => Date.now();
 const msLeft = (start: number, reserve = 8_000) => Math.max(1_000, FUNCTION_DEADLINE_MS - (Date.now() - start) - reserve);
 const hasTimeFor = (start: number, ms: number) => msLeft(start, 0) > ms;
