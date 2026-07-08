@@ -341,22 +341,31 @@ async function firecrawlScrape(url: string, timeoutMs = 15_000): Promise<{ markd
   return null;
 }
 
-async function scrapeSingle(url: string, timeoutMs = 34_000): Promise<ScrapeResult | null> {
+async function scrapeSingle(
+  url: string,
+  opts: { tokens: ApifyToken[]; admin?: any; timeoutMs?: number },
+): Promise<ScrapeResult | null> {
   const normalized = await resolveFiverrUrl(url);
+  const budget = opts.timeoutMs || 55_000;
 
-  const direct = await directFiverrScrape(normalized, Math.min(5_000, timeoutMs));
-  if (direct) return direct;
+  // For Fiverr, direct HTTP is almost always a JS shell / blocked; Apify (real browser + residential proxy) is the reliable source.
+  const apify = await apifyCrawl([normalized], {
+    maxCrawlDepth: 0,
+    maxPages: 1,
+    timeoutMs: Math.min(55_000, budget),
+    tokens: opts.tokens,
+    admin: opts.admin,
+  }).catch((e) => { console.error("apify single error", normalized, (e as Error).message); return []; });
+  if (apify[0]) return apify[0];
 
-  const firecrawl = await firecrawlScrape(normalized, Math.min(7_000, timeoutMs));
+  const firecrawl = await firecrawlScrape(normalized, Math.min(15_000, budget)).catch(() => null);
   if (firecrawl && looksUsable(firecrawl.markdown)) {
     return { url: normalized, markdown: firecrawl.markdown, metadata: firecrawl.metadata, source: "firecrawl" };
   }
 
-  const apify = await apifyCrawl([normalized], { maxCrawlDepth: 0, maxPages: 1, timeoutMs: Math.min(8_000, timeoutMs) }).catch((e) => {
-    console.error("apify single error", normalized, (e as Error).message);
-    return [];
-  });
-  if (apify[0]) return apify[0];
+  const direct = await directFiverrScrape(normalized, Math.min(8_000, budget)).catch(() => null);
+  if (direct) return direct;
+
   return null;
 }
 
