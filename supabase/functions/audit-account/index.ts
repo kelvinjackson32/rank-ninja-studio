@@ -855,8 +855,8 @@ Deno.serve(async (req) => {
       gigAudits: ranked,
       failedGigs,
       skippedGigs,
-      blockedNote: failedGigs.length > 0 || (profileUrl && !profileScrape) || (profileUrl && allGigUrls.length === 0)
-        ? "The backend tried direct Fiverr reading first, then Apify and Firecrawl. Some live pages could not be fully verified, so the audit includes best-practice rewrites plus a warning to confirm public visibility."
+      blockedNote: failedGigs.length > 0 || (profileUrl && !profileScrape)
+        ? `Fiverr blocked automated reading for ${(profileUrl && !profileScrape ? 1 : 0) + failedGigs.length} page(s) across ${tokens.length} Apify key(s). The audit refuses to invent titles/descriptions it did not read — the flagged pages show an honest "could not verify" result instead of fake data.`
         : null,
       audit: profileAudit || ranked[0]?.audit || null,
     };
