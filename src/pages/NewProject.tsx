@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Rocket, Plus, X, Layers } from "lucide-react";
+import { Rocket, Plus, X, Layers, Search, Tag } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { AppShell } from "@/components/AppShell";
@@ -17,7 +17,9 @@ const DURATIONS = [15, 30, 60];
 const NewProject = () => {
   const { user } = useAuth();
   const nav = useNavigate();
-  const [bulk, setBulk] = useState(false);
+  const [mode, setMode] = useState<"niche" | "title" | "bulk">("niche");
+  const bulk = mode === "bulk";
+  const [gigTitle, setGigTitle] = useState("");
   const [niche, setNiche] = useState("");
   const [secondary, setSecondary] = useState<string[]>([""]);
   const [bulkNiches, setBulkNiches] = useState<string[]>(["", ""]);
@@ -54,6 +56,21 @@ const NewProject = () => {
         return;
       }
 
+      if (mode === "title") {
+        const title = gigTitle.trim().slice(0, 80);
+        if (title.length < 10) { toast.error("Paste your full gig title (at least 10 characters)"); return; }
+        const derivedNiche = title.replace(/^i\s+will\s+/i, "").replace(/\s+for\s+.*$/i, "").trim().slice(0, 120) || title;
+        const { data: p, error: e1 } = await supabase.from("projects").insert({
+          user_id: user!.id, niche: derivedNiche, provided_gig_title: title, secondary_keywords: [], status: "pending",
+          target_duration_seconds: targetDuration, character_lock: characterLock,
+        } as any).select().single();
+        if (e1) throw e1;
+        await launchResearch(p.id);
+        toast.success("Researching setup for your existing gig title!");
+        nav(`/app/projects/${p.id}`);
+        return;
+      }
+
       if (!niche.trim()) { toast.error("Enter your main niche"); return; }
       const sec = secondary.map(s => s.trim()).filter(Boolean).slice(0, 2);
       const { data: project, error } = await supabase.from("projects").insert({
@@ -79,18 +96,48 @@ const NewProject = () => {
         </div>
 
         <div className="surface-card rounded-xl p-6 space-y-6 scan-line">
-          <div className="flex items-center justify-between border border-border rounded-lg p-3 bg-muted/20">
-            <div className="flex items-center gap-2">
-              <Layers className="w-4 h-4 text-primary" />
-              <div>
-                <div className="text-sm font-semibold">Bulk Research Mode</div>
-                <div className="text-xs text-muted-foreground">Compare up to {MAX_BULK} niches side-by-side</div>
-              </div>
+          <div>
+            <Label className="font-mono text-xs uppercase tracking-wider">How do you want to start?</Label>
+            <div className="grid sm:grid-cols-3 gap-2 mt-2">
+              {([
+                { key: "niche", icon: Search, title: "New niche", sub: "Research a service keyword" },
+                { key: "title", icon: Tag, title: "I have a gig title", sub: "Generate its full setup" },
+                { key: "bulk", icon: Layers, title: "Bulk compare", sub: `Up to ${MAX_BULK} niches` },
+              ] as const).map((m) => {
+                const Icon = m.icon;
+                const active = mode === m.key;
+                return (
+                  <button
+                    key={m.key}
+                    type="button"
+                    onClick={() => setMode(m.key)}
+                    className={`text-left rounded-lg border p-3 transition-colors ${active ? "border-primary bg-primary/10" : "border-border bg-muted/20 hover:border-primary/40"}`}
+                  >
+                    <Icon className={`w-4 h-4 mb-1.5 ${active ? "text-primary" : "text-muted-foreground"}`} />
+                    <div className="text-sm font-semibold">{m.title}</div>
+                    <div className="text-xs text-muted-foreground">{m.sub}</div>
+                  </button>
+                );
+              })}
             </div>
-            <Switch checked={bulk} onCheckedChange={setBulk} />
           </div>
 
-          {!bulk && (
+          {mode === "title" && (
+            <div>
+              <Label className="font-mono text-xs uppercase tracking-wider">Your existing gig title</Label>
+              <p className="text-xs text-muted-foreground mt-1">Paste the exact title you already have. We keep it word-for-word and research + generate everything around it: category, search tags, description, buyer requirements, FAQs, packages, thumbnails{" "}and video concepts.</p>
+              <Input
+                value={gigTitle}
+                onChange={(e) => setGigTitle(e.target.value.slice(0, 80))}
+                placeholder="I will create cinematic AI video ads for your brand"
+                className="mt-2 h-12 font-mono bg-input/50"
+                maxLength={80}
+              />
+              <div className="text-xs font-mono text-muted-foreground mt-1">{gigTitle.length}/80 chars</div>
+            </div>
+          )}
+
+          {mode === "niche" && (
             <>
               <div>
                 <Label className="font-mono text-xs uppercase tracking-wider">Main Niche / Service Keyword</Label>
@@ -193,7 +240,7 @@ const NewProject = () => {
 
           <Button onClick={launch} disabled={loading} size="lg" className="w-full h-14 text-base bg-gradient-to-r from-primary to-secondary text-primary-foreground hover:opacity-90 animate-pulse-glow">
             <Rocket className="w-5 h-5 mr-2" />
-            {loading ? "Launching..." : bulk ? "Launch Bulk Research & Compare" : "Start Deep Research & Generate Everything"}
+            {loading ? "Launching..." : bulk ? "Launch Bulk Research & Compare" : mode === "title" ? "Research & Build This Gig Title" : "Start Deep Research & Generate Everything"}
           </Button>
         </div>
       </div>
