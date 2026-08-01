@@ -49,21 +49,7 @@ function extractJson(text: string): any {
   throw new Error("Gemini returned non-JSON output");
 }
 
-function capPackages(packages: any) {
-  if (!packages || typeof packages !== "object") return packages;
-  for (const tier of Object.keys(packages)) {
-    const pk = packages[tier];
-    if (!pk) continue;
-    if (typeof pk.name === "string" && pk.name.length > 100) pk.name = pk.name.slice(0, 97).trimEnd() + "...";
-    if (Array.isArray(pk.features)) {
-      pk.features = pk.features.map((f: any) => {
-        const s = String(f ?? "");
-        return s.length > 100 ? s.slice(0, 97).trimEnd() + "..." : s;
-      });
-    }
-  }
-  return packages;
-}
+import { capPackages } from "../_shared/packageCaps.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
