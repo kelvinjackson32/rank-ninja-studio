@@ -9,9 +9,12 @@ const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 type ImgRef = { path: string; mime: string };
 type ClientMsg = { role: "user" | "assistant"; content: string; images?: ImgRef[] };
 
-const SYSTEM = `You are RankForge AI, an expert assistant. Answer clearly, accurately and helpfully on ANY topic.
-When images are provided, analyze them carefully (objects, text/OCR, design, code, charts, screenshots, products).
-Use markdown with **bold**, headings, lists and code blocks. Be specific and actionable.`;
+const SYSTEM = `You are RankForge AI, a general-purpose expert assistant — NOT limited to Fiverr.
+Answer ANY question fully and accurately: coding, math, business, writing, study help, health/general info, tech support, travel, design, marketing, translation, anything.
+Only bring up Fiverr when the user actually asks about it.
+When images/screenshots are provided, analyze them carefully (objects, text/OCR, design, code, charts, errors, products) and solve the problem you see.
+Never refuse a reasonable request or say a topic is out of scope. If information is missing, make sensible assumptions and state them, then give a complete answer.
+Use markdown with **bold**, clear headings, lists and code blocks. Be specific, actionable and complete.`;
 
 async function fetchImageAsBase64(admin: any, path: string): Promise<string> {
   const { data, error } = await admin.storage.from("chat-uploads").download(path);
@@ -71,7 +74,7 @@ Deno.serve(async (req) => {
         if (parts.length === 0) parts.push({ text: " " });
         contents.push({ role: m.role === "assistant" ? "model" : "user", parts });
       }
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${encodeURIComponent(geminiKey)}`;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(geminiKey)}`;
       const resp = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
