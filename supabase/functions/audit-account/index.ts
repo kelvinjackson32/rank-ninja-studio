@@ -746,6 +746,8 @@ Deno.serve(async (req) => {
     const profileUrl: string | undefined = normalizeProfileInput(body.profileUrl);
     const username = getFiverrUsername(profileUrl);
     const niche: string | undefined = body.niche?.trim();
+    const pastedProfile: string = String(body.pastedProfile || "").trim().slice(0, 12000);
+    const pastedGig: string = String(body.pastedGig || "").trim().slice(0, 12000);
     const issue: string | undefined = body.issue?.trim();
     const gigUrls: string[] = Array.isArray(body.gigUrls)
       ? body.gigUrls.map((u: string) => canonicalUrl(u)).filter(Boolean)
@@ -786,7 +788,7 @@ Deno.serve(async (req) => {
     // and avoid the 150s edge function idle timeout.
     const work = (async () => {
       try {
-        await runAuditWork(admin, { profileUrl, username, niche, issue, gigUrls, geminiKey, tokens, auditId });
+        await runAuditWork(admin, { profileUrl, username, niche, issue, gigUrls, geminiKey, tokens, auditId, pastedProfile, pastedGig });
       } catch (e: any) {
         console.error("background audit error:", e);
         try {
@@ -815,9 +817,12 @@ Deno.serve(async (req) => {
 async function runAuditWork(admin: any, opts: {
   profileUrl?: string; username: string | null; niche?: string; issue?: string;
   gigUrls: string[]; geminiKey: string; tokens: ApifyToken[]; auditId: string;
+  pastedProfile?: string; pastedGig?: string;
 }) {
   const requestStart = startedAt();
   const { profileUrl, username, niche, issue, gigUrls, geminiKey, tokens, auditId } = opts;
+  const pastedProfile = (opts.pastedProfile || "").trim();
+  const pastedGig = (opts.pastedGig || "").trim();
 
   const combinedStartUrls = Array.from(new Set([
     ...(profileUrl ? [profileUrl] : []),
@@ -834,10 +839,15 @@ async function runAuditWork(admin: any, opts: {
       }).catch((e) => { console.error("combined apify error", (e as Error).message); return [] as ScrapeResult[]; })
     : [];
 
-  const profileScrape = profileUrl
+  const scrapedProfile = profileUrl
     ? (combinedCrawl.find((item) => !isLikelyGigUrl(item.url, username) && getFiverrUsername(item.url)?.toLowerCase() === username?.toLowerCase())
       || await scrapeSingle(profileUrl, { tokens, admin, timeoutMs: 45_000 }))
     : null;
+  // If Fiverr blocked the scrape but the user pasted their real setup, audit THAT (verified by the user).
+  const profileScrape: ScrapeResult | null = scrapedProfile
+    || (pastedProfile && profileUrl
+      ? { url: profileUrl, markdown: `PASTED BY THE ACCOUNT OWNER (treat as the real current live setup):\n${pastedProfile}`, metadata: {}, source: "direct" as const }
+      : null);
 
   const discoveredGigUrls = Array.from(new Set([
     ...extractGigUrlsFromScrape(profileScrape, username),
@@ -850,7 +860,10 @@ async function runAuditWork(admin: any, opts: {
 
   const gigScrapes = await Promise.all(allGigUrls.map(async (url) => {
     const fromCombined = combinedCrawl.find((item) => canonicalUrl(item.url) === canonicalUrl(url));
-    const r = fromCombined || await scrapeSingle(url, { tokens, admin, timeoutMs: 35_000 });
+    let r = fromCombined || await scrapeSingle(url, { tokens, admin, timeoutMs: 35_000 });
+    if (!r && pastedGig && canonicalUrl(url) === canonicalUrl(allGigUrls[0])) {
+      r = { url, markdown: `PASTED BY THE GIG OWNER (treat as the real current live setup):\n${pastedGig}`, metadata: {}, source: "direct" as const };
+    }
     return { url, r };
   }));
 
@@ -893,9 +906,14 @@ async function runAuditWork(admin: any, opts: {
       const high = issues.filter((i: any) => i.severity === "high").length;
       const med = issues.filter((i: any) => i.severity === "medium").length;
       const low = issues.filter((i: any) => i.severity === "low").length;
-      const score = g.audit?.overall_score ?? 50;
-      const priority = (100 - score) + high * 15 + med * 6 + low * 2;
-      return { ...g, priority, high, med, low, score };
+      const verified = (g.audit as any)?._scraped !== false;
+      const score = typeof g.audit?.overall_score === "number" ? g.audit.overall_score : 0;
+      // Unverified pages (Fiverr blocked the read) are pushed to the bottom instead of
+      // faking a "worst gig" ranking from a score of 0.
+      const priority = verified
+        ? (100 - score) + high * 15 + med * 6 + low * 2
+        : -1000 + high;
+      return { ...g, priority, high, med, low, score, verified };
     })
     .sort((a, b) => b.priority - a.priority)
     .map((g, i) => ({ ...g, rank: i + 1 }));
