@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from "@/components/ui/accordion";
@@ -224,6 +225,8 @@ const Audit = () => {
   const [gigUrls, setGigUrls] = useState<string[]>([""]);
   const [niche, setNiche] = useState("");
   const [issue, setIssue] = useState("");
+  const [pastedGig, setPastedGig] = useState("");
+  const [pastedProfile, setPastedProfile] = useState("");
   const [loading, setLoading] = useState(false);
   const [profileAudit, setProfileAudit] = useState<Audit | null>(null);
   const [ranked, setRanked] = useState<RankedGig[]>([]);
@@ -280,7 +283,7 @@ const Audit = () => {
     setLoading(true); setProfileAudit(null); setRanked([]); setFailedGigs([]); setBlockedNote(null); setCurrentId(null);
     try {
       const { data, error } = await supabase.functions.invoke("audit-account", {
-        body: { profileUrl, gigUrls: cleanGigs, niche, issue },
+        body: { profileUrl, gigUrls: cleanGigs, niche, issue, pastedGig, pastedProfile },
       });
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
@@ -387,6 +390,35 @@ const Audit = () => {
               <div>
                 <label className="text-xs font-mono uppercase text-muted-foreground mb-1.5 block">What's the problem?</label>
                 <Input placeholder="Low impressions, no orders…" value={issue} onChange={(e) => setIssue(e.target.value)} />
+              </div>
+            </div>
+
+            <div className="border border-border rounded-lg p-3 bg-muted/20 space-y-3">
+              <div>
+                <div className="text-xs font-mono uppercase text-primary">// Paste your current setup (most accurate)</div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Fiverr often blocks bots. If a page can't be read, the audit will use the text you paste here instead — that gives a 100% accurate, no-guessing audit.
+                </p>
+              </div>
+              <div>
+                <label className="text-xs font-mono uppercase text-muted-foreground mb-1.5 block">Your gig (title, tags, description, packages, requirements)</label>
+                <Textarea
+                  rows={5}
+                  placeholder={"Title: I will...\nTags: ...\nDescription: ...\nPackages: Basic $10 / Standard $25 / Premium $50..."}
+                  value={pastedGig}
+                  onChange={(e) => setPastedGig(e.target.value)}
+                  className="font-mono text-xs"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-mono uppercase text-muted-foreground mb-1.5 block">Your profile (title, bio/description, skills, languages)</label>
+                <Textarea
+                  rows={4}
+                  placeholder={"Profile title: ...\nBio: ...\nSkills: ..."}
+                  value={pastedProfile}
+                  onChange={(e) => setPastedProfile(e.target.value)}
+                  className="font-mono text-xs"
+                />
               </div>
             </div>
 
