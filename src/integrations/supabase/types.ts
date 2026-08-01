@@ -220,6 +220,7 @@ export type Database = {
         Row: {
           blocked_note: string | null
           created_at: string
+          error_message: string | null
           failed_gigs: Json
           gig_audits: Json
           gig_urls: Json
@@ -229,12 +230,14 @@ export type Database = {
           niche: string | null
           profile_audit: Json | null
           profile_url: string | null
+          status: string | null
           updated_at: string
           user_id: string
         }
         Insert: {
           blocked_note?: string | null
           created_at?: string
+          error_message?: string | null
           failed_gigs?: Json
           gig_audits?: Json
           gig_urls?: Json
@@ -244,12 +247,14 @@ export type Database = {
           niche?: string | null
           profile_audit?: Json | null
           profile_url?: string | null
+          status?: string | null
           updated_at?: string
           user_id: string
         }
         Update: {
           blocked_note?: string | null
           created_at?: string
+          error_message?: string | null
           failed_gigs?: Json
           gig_audits?: Json
           gig_urls?: Json
@@ -259,6 +264,7 @@ export type Database = {
           niche?: string | null
           profile_audit?: Json | null
           profile_url?: string | null
+          status?: string | null
           updated_at?: string
           user_id?: string
         }
