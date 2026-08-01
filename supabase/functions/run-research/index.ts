@@ -641,22 +641,13 @@ REQUIREMENTS:
     if (typeof profile_optimization.about === "string" && profile_optimization.about.length > 500) {
       profile_optimization.about = profile_optimization.about.slice(0, 497).trimEnd() + "...";
     }
-    // Hard-cap package name AND every feature to 100 chars (Fiverr enforces this)
-    if (gig_optimization.packages && typeof gig_optimization.packages === "object") {
-      for (const tier of Object.keys(gig_optimization.packages)) {
-        const pk = gig_optimization.packages[tier];
-        if (!pk) continue;
-        if (typeof pk.name === "string" && pk.name.length > 100) {
-          pk.name = pk.name.slice(0, 97).trimEnd() + "...";
-        }
-        if (Array.isArray(pk.features)) {
-          pk.features = pk.features.map((f: any) => {
-            const s = String(f ?? "");
-            return s.length > 100 ? s.slice(0, 97).trimEnd() + "..." : s;
-          });
-        }
-      }
+    // Hard-cap packages: name <=100, each feature <=100, and total package
+    // description (features joined) <=100 chars — Fiverr enforces this.
+    {
+      const { capPackages } = await import("../_shared/packageCaps.ts");
+      capPackages(gig_optimization.packages);
     }
+
     // Cap thumbnails to 2
     if (Array.isArray(gig_optimization.thumbnail_prompts) && gig_optimization.thumbnail_prompts.length > 2) {
       gig_optimization.thumbnail_prompts = gig_optimization.thumbnail_prompts.slice(0, 2);
