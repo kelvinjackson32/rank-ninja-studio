@@ -141,6 +141,7 @@ export type Database = {
           id: string
           niche: string
           progress_log: Json | null
+          provided_gig_title: string | null
           secondary_keywords: string[] | null
           status: string
           target_duration_seconds: number
@@ -154,6 +155,7 @@ export type Database = {
           id?: string
           niche: string
           progress_log?: Json | null
+          provided_gig_title?: string | null
           secondary_keywords?: string[] | null
           status?: string
           target_duration_seconds?: number
@@ -167,6 +169,7 @@ export type Database = {
           id?: string
           niche?: string
           progress_log?: Json | null
+          provided_gig_title?: string | null
           secondary_keywords?: string[] | null
           status?: string
           target_duration_seconds?: number
