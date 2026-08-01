@@ -685,6 +685,10 @@ User-reported problem: ${opts.issue || "low impressions, low clicks, no orders"}
 ${scrapedBlock}
 
 Rules:
+- ACCURACY IS EVERYTHING. Every "problem" you list MUST be provable from the scraped/pasted content above. Quote the exact text you are judging.
+- If a field is NOT visible in the content (e.g. tags, packages, requirements, images), do NOT claim it is missing or bad. Instead say "not visible in the scraped page — verify manually" and mark it severity "low".
+- Never invent a current title, bio, price, review count or rating. If you did not read it, say so.
+- overall_score must be justified by what you actually read: 0-39 only if the read content is genuinely weak, 40-69 average, 70-100 strong.
 - Be brutally honest, specific, and actionable. No fluff.
 - Use the ACTUAL scraped Fiverr setup. Quote the exact existing weak title / bio / description / package / image / trust signal you see, THEN rewrite it.
 - rewrites.gig_title MUST be a NEW perfect gig title (never repeat the current one).
@@ -919,7 +923,7 @@ async function runAuditWork(admin: any, opts: {
     .map((g, i) => ({ ...g, rank: i + 1 }));
 
   const blockedNote = failedGigs.length > 0 || (profileUrl && !profileScrape)
-    ? `Fiverr blocked automated reading for ${(profileUrl && !profileScrape ? 1 : 0) + failedGigs.length} page(s) across ${tokens.length} Apify key(s). The audit refuses to invent titles/descriptions it did not read — the flagged pages show an honest "could not verify" result instead of fake data.`
+    ? `Fiverr blocked automated reading for ${(profileUrl && !profileScrape ? 1 : 0) + failedGigs.length} page(s) across ${tokens.length} Apify key(s). The audit refuses to invent titles/descriptions it did not read — the flagged pages show an honest "could not verify" result instead of fake data. Tip: copy your real gig/profile text into the "Paste your current setup" box and re-run for a 100% accurate audit.`
     : null;
 
   await admin.from("saved_audits").update({
