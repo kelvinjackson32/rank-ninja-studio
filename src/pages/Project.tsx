@@ -938,6 +938,11 @@ const GigView = ({ gig, resultId, onUpdate, copy }: any) => {
                 <ul className="text-xs space-y-1 mt-3">
                   {(p.features || []).map((feat: string, i: number) => <li key={i} className="flex gap-2"><span className="text-primary">✓</span>{feat}</li>)}
                 </ul>
+                <div className="mt-3">
+                  <div className="font-mono text-[10px] uppercase text-muted-foreground mb-1">Paste into Fiverr package description</div>
+                  <FiverrFieldMeter fieldKey="package_description" value={(p.features || []).join(" • ")} />
+                </div>
+
               </div>
             );
           })}
