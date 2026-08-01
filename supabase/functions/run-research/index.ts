@@ -553,12 +553,16 @@ For "niche_angles": return EXACTLY 3 distinct angles. Each must be a REFINEMENT/
     await appendLog(admin, projectId, `✏️ Generating profile, gig package, requirements, and thumbnails...`);
     const targetDuration = Number(project.target_duration_seconds) || 30;
     const characterLock = project.character_lock !== false;
+    const providedTitle = String(project.provided_gig_title || "").trim().slice(0, 80);
+    const providedTitleRule = providedTitle
+      ? `\n\nLOCKED GIG TITLE MODE: The user already has this exact gig title and it MUST NOT be changed:\n"${providedTitle}"\n- Set gig_optimization.gig_title to EXACTLY that string, character for character.\n- Every other field (category, search_tags, description, buyer_requirements, faqs, packages, thumbnail_prompts, video_concepts, profile copy) must be built to match and sell THAT exact title.\n- title_variations must still return 6 alternative angles the user could switch to later, but gig_title stays locked.`
+      : "";
     const offer = await generateJson(
       `Based on this Fiverr competitor research for "${project.niche}":
 Insights: ${JSON.stringify(insights)}
 Top gigs sample: ${dataBlob.slice(0, 9000)}
 
-Variation seed: ${variationSeed}
+Variation seed: ${variationSeed}${providedTitleRule}
 
 Generate the complete Fiverr profile and gig package in ONE valid JSON object with EXACTLY these top-level keys:
 {
@@ -588,9 +592,9 @@ Generate the complete Fiverr profile and gig package in ONE valid JSON object wi
     "buyer_requirements": [{"question":"niche-specific order question","type":"free_text|multiple_choice|attachment","required":true,"options":["only for multiple_choice"]}],
     "faqs": [{"q":"...","a":"..."}],
     "packages": {
-      "basic":{"name":"...","price":"$X","delivery_days":2,"revisions":1,"features":["each feature MAX 100 chars"]},
-      "standard":{"name":"...","price":"$X","delivery_days":3,"revisions":2,"features":["each feature MAX 100 chars"]},
-      "premium":{"name":"...","price":"$X","delivery_days":5,"revisions":3,"features":["each feature MAX 100 chars"]}
+      "basic":{"name":"2-4 words","price":"$X","delivery_days":2,"revisions":1,"features":["2-3 ultra-short phrases, ALL features COMBINED must be <=100 chars total"]},
+      "standard":{"name":"2-4 words","price":"$X","delivery_days":3,"revisions":2,"features":["2-3 ultra-short phrases, ALL features COMBINED must be <=100 chars total"]},
+      "premium":{"name":"2-4 words","price":"$X","delivery_days":5,"revisions":3,"features":["2-3 ultra-short phrases, ALL features COMBINED must be <=100 chars total"]}
     },
     "thumbnail_prompts": [{"style":"...","prompt":"80-140 word image-gen prompt for 1280x769 Fiverr gig image, with bold headline words, focal point, trust elements, palette, --ar 1280:769 --no watermark, blurry, low-res, lorem-ipsum text --style raw"}],
     "is_video_gig": true_or_false_boolean_indicating_if_this_niche_requires_a_demo_video_upload_on_fiverr,
@@ -622,7 +626,7 @@ REQUIREMENTS:
 - buyer_requirements: 4-6 niche-specific items.
 - faqs: exactly 8 items.
 - thumbnail_prompts: EXACTLY 2 varied styles modeled on high-click Fiverr thumbnails.
-- packages: every feature string MAX 100 characters (hard limit, Fiverr enforces this).
+- packages: Fiverr allows only 100 characters TOTAL per package description. Each tier's features array combined (including " • " separators) MUST be <=100 characters. Use telegraphic phrases, never sentences.
 - is_video_gig: set to true ONLY if the niche is a video deliverable that Fiverr requires a video upload for (AI video, UGC video, music video, kids music video, video editing, video ads, animation, faceless YouTube, motion graphics, explainer video, etc). Otherwise false.
 - video_concepts: if is_video_gig is true → return EXACTLY 2 distinct demo-video concepts aligned to the gig style. If false → return empty array [].
 - EVERY video_concept.duration_seconds MUST equal ${targetDuration}. Stage 3 timestamps and Stage 6 scene counts MUST add up to exactly ${targetDuration} seconds.
@@ -641,22 +645,14 @@ REQUIREMENTS:
     if (typeof profile_optimization.about === "string" && profile_optimization.about.length > 500) {
       profile_optimization.about = profile_optimization.about.slice(0, 497).trimEnd() + "...";
     }
-    // Hard-cap package name AND every feature to 100 chars (Fiverr enforces this)
-    if (gig_optimization.packages && typeof gig_optimization.packages === "object") {
-      for (const tier of Object.keys(gig_optimization.packages)) {
-        const pk = gig_optimization.packages[tier];
-        if (!pk) continue;
-        if (typeof pk.name === "string" && pk.name.length > 100) {
-          pk.name = pk.name.slice(0, 97).trimEnd() + "...";
-        }
-        if (Array.isArray(pk.features)) {
-          pk.features = pk.features.map((f: any) => {
-            const s = String(f ?? "");
-            return s.length > 100 ? s.slice(0, 97).trimEnd() + "..." : s;
-          });
-        }
-      }
+    // Hard-cap packages: name <=100, each feature <=100, and total package
+    // description (features joined) <=100 chars — Fiverr enforces this.
+    if (providedTitle) gig_optimization.gig_title = providedTitle;
+    {
+      const { capPackages } = await import("../_shared/packageCaps.ts");
+      capPackages(gig_optimization.packages);
     }
+
     // Cap thumbnails to 2
     if (Array.isArray(gig_optimization.thumbnail_prompts) && gig_optimization.thumbnail_prompts.length > 2) {
       gig_optimization.thumbnail_prompts = gig_optimization.thumbnail_prompts.slice(0, 2);

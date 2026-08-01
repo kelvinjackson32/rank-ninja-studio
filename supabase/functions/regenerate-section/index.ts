@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { capPackages, PACKAGE_RULES } from "../_shared/packageCaps.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -47,22 +48,6 @@ function extractJson(text: string): any {
     else if (c === "}") { depth--; if (depth === 0 && start >= 0) { try { return JSON.parse(cleaned.slice(start, i + 1)); } catch {} } }
   }
   throw new Error("Gemini returned non-JSON output");
-}
-
-function capPackages(packages: any) {
-  if (!packages || typeof packages !== "object") return packages;
-  for (const tier of Object.keys(packages)) {
-    const pk = packages[tier];
-    if (!pk) continue;
-    if (typeof pk.name === "string" && pk.name.length > 100) pk.name = pk.name.slice(0, 97).trimEnd() + "...";
-    if (Array.isArray(pk.features)) {
-      pk.features = pk.features.map((f: any) => {
-        const s = String(f ?? "");
-        return s.length > 100 ? s.slice(0, 97).trimEnd() + "..." : s;
-      });
-    }
-  }
-  return packages;
 }
 
 Deno.serve(async (req) => {
