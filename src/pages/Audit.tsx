@@ -54,6 +54,9 @@ const sevColor = (s: string) =>
 const scoreColor = (n: number) =>
   n >= 70 ? "text-success" : n >= 40 ? "text-warning" : "text-destructive";
 
+const isStaleAudit = (audit: SavedAudit) =>
+  audit.status === "processing" && Date.now() - new Date(audit.created_at).getTime() > 4 * 60 * 1000;
+
 const copy = (v: any) => {
   navigator.clipboard.writeText(typeof v === "string" ? v : JSON.stringify(v, null, 2));
   toast({ title: "Copied" });
@@ -267,7 +270,9 @@ const Audit = () => {
     setRanked(s.gig_audits || []);
     setFailedGigs(s.failed_gigs || []);
     setBlockedNote(s.blocked_note || null);
-    if (s.status === "processing") {
+    if (isStaleAudit(s)) {
+      toast({ title: "Incomplete audit", description: "This older audit was interrupted before results were saved. Run it again to use the fixed deep-audit flow.", variant: "destructive" });
+    } else if (s.status === "processing") {
       toast({ title: "Audit still running", description: "The live pages are still being checked. Results will appear here when complete." });
     } else if (s.status === "error") {
       toast({ title: "Audit failed", description: s.error_message || "Please run this audit again.", variant: "destructive" });
@@ -364,7 +369,7 @@ const Audit = () => {
                     <div className="flex-1 min-w-0">
                       <div className="font-semibold text-sm truncate">{s.label}</div>
                       <div className="text-xs text-muted-foreground truncate">
-                        {new Date(s.created_at).toLocaleString()} · {s.gig_urls?.length || 0} gig{(s.gig_urls?.length || 0) === 1 ? "" : "s"} · {s.status === "processing" ? "Checking…" : s.status === "error" ? "Failed" : "Complete"}
+                        {new Date(s.created_at).toLocaleString()} · {s.gig_urls?.length || 0} gig{(s.gig_urls?.length || 0) === 1 ? "" : "s"} · {isStaleAudit(s) ? "Incomplete — run again" : s.status === "processing" ? "Checking…" : s.status === "error" ? "Failed" : "Complete"}
                       </div>
                     </div>
                     <Button variant="ghost" size="sm" onClick={() => openSaved(s)}><RefreshCw className="w-3.5 h-3.5 mr-1" />Open</Button>
