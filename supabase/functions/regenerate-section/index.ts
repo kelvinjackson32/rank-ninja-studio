@@ -1,5 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
-import { capPackages, PACKAGE_RULES } from "../_shared/packageCaps.ts";
+import { capPackages, enforcePackages, PACKAGE_RULES } from "../_shared/packageCaps.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -125,7 +125,9 @@ HARD RULES:
 
       const text = await callGemini(prompt, system, geminiKey, true, 20000);
       const newGig = extractJson(text);
-      newGig.packages = capPackages(newGig.packages);
+      const enforcedCascade = enforcePackages(newGig.packages);
+      newGig.packages = enforcedCascade.packages;
+      newGig.package_char_counts = enforcedCascade.counts;
       if (typeof newGig.gig_title === "string" && newGig.gig_title.length > 80) {
         newGig.gig_title = newGig.gig_title.slice(0, 80);
       }
@@ -150,7 +152,12 @@ HARD RULES:
     const text = await callGemini(prompt, system, geminiKey, false, 4096);
     let value: any = text.replace(/^```(?:json)?\s*|\s*```$/g, "").trim();
     try { value = JSON.parse(value); } catch {}
-    if (field === "packages") value = capPackages(value);
+    let packageCharCounts: any = undefined;
+    if (field === "packages") {
+      const enforced = enforcePackages(value);
+      value = enforced.packages;
+      packageCharCounts = enforced.counts;
+    }
 
     const { applySafetyFilter } = await import("../_shared/safety.ts");
     const fieldSafe = applySafetyFilter({ [field]: value }, section);
@@ -168,7 +175,7 @@ HARD RULES:
     const updated = { ...existing, [field]: value, safety_report: mergedReport };
     await admin.from("research_results").update({ [key]: updated }).eq("id", resultId);
 
-    return new Response(JSON.stringify({ success: true, value, safety_report: fieldSafe.report }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ success: true, value, package_char_counts: packageCharCounts, safety_report: fieldSafe.report }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
   } catch (e: any) {
     return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });

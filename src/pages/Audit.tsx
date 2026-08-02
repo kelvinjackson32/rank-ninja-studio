@@ -12,6 +12,7 @@ import {
   Stethoscope, Loader2, AlertTriangle, CheckCircle2, Wrench, Copy, Sparkles,
   Plus, X, Flame, TrendingUp, ExternalLink, Trophy, History, Trash2, RefreshCw, Target, Pencil, Image as ImageIcon,
 } from "lucide-react";
+import { SourceEvidencePanel, type EvidenceItem } from "@/components/SourceEvidencePanel";
 
 type Issue = { area: string; severity: string; problem: string; why_it_hurts: string; fix: string };
 type AccountEdit = { where_to_edit: string; what_to_change: string; priority: string };
@@ -26,6 +27,7 @@ type Audit = {
   account_edits?: AccountEdit[];
   action_plan: { step: number; action: string; expected_impact: string; time_to_apply: string }[];
   image_prompts: { slot: string; prompt: string }[];
+  source_evidence?: EvidenceItem[];
 };
 type RankedGig = { url: string; title: string; audit: Audit; priority: number; high: number; med: number; low: number; score: number; rank: number };
 type SavedAudit = {
@@ -69,6 +71,8 @@ const RewriteBlock = ({ label, current, improved, reason }: { label: string; cur
 
 const AuditReport = ({ audit }: { audit: Audit }) => (
   <div className="space-y-5">
+    <SourceEvidencePanel evidence={audit.source_evidence} />
+
     {audit.top_issues_summary && audit.top_issues_summary.length > 0 && (
       <div>
         <div className="font-mono text-xs uppercase text-destructive mb-2 flex items-center gap-2"><AlertTriangle className="w-4 h-4" /> Issues affecting this account</div>

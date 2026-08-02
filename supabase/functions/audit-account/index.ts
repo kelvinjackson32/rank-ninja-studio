@@ -516,6 +516,7 @@ function heuristicAudit(target: "PROFILE" | "GIG", url: string, opts: { niche?: 
       { slot: "Thumbnail 2", prompt: `Premium 1280x769 service thumbnail for ${service}, left-side expert workspace visual, right-side 3-word hook "FAST QUALITY WORK", bright accent color, clean modern layout, realistic deliverable preview, crisp typography, no watermark` },
       { slot: "Thumbnail 3", prompt: `Premium 1280x769 Fiverr gig image for ${service}, before-and-after result composition, strong focal point, benefit text "READY TO USE", polished professional lighting, high trust design, bold sans-serif text, no watermark` },
     ],
+    source_evidence: verifyEvidence([], null, url, null),
     _scraped: false,
     _source: "built-in-fallback",
     _url: url,
@@ -550,6 +551,7 @@ Rules:
       parsed._scraped = false;
       parsed._source = "fallback";
       parsed._url = url;
+      parsed.source_evidence = verifyEvidence(parsed.source_evidence, null, url, null);
       return parsed;
     }
   } catch (e) {
@@ -589,6 +591,7 @@ function unavailableAudit(target: "PROFILE" | "GIG", url: string, reason: string
       time_to_apply: "2 min",
     }],
     image_prompts: [],
+    source_evidence: verifyEvidence([], null, url, null),
     _scraped: false,
     _source: null,
     _url: url,
@@ -656,8 +659,56 @@ const AUDIT_SHAPE = `{
     { "where_to_edit": "Profile → Description | Gig → Overview → Title | Gig → Description | Gig → Gallery | Gig → Requirements | Gig → Pricing | Profile → Skills | Profile → Languages", "what_to_change": "...", "priority": "high|medium|low" }
   ],
   "action_plan": [{ "step": 1, "action": "...", "expected_impact": "...", "time_to_apply": "5 min" }],
+  "source_evidence": [
+    { "field": "Gig Title|Search Tags|Gig Description|Profile Bio|Packages/Pricing|Buyer Requirements|Gallery/Images|Reviews & Ratings|Response Time|Seller Level", "used_for": "<which check(s) this field fed>", "quote": "<EXACT text copied from the scraped content above, or empty string if the field was not readable>", "status": "verified|needs_manual_confirmation", "note": "<why it is verified, or what the user must confirm on Fiverr>" }
+  ],
   "image_prompts": [{ "slot": "Thumbnail 1|2|3", "prompt": "<PREMIUM 1280x769 Fiverr gig thumbnail prompt. Must include: bold subject centered/left, high contrast background, 2-4 word overlay hook, brand color accent, professional lighting, mock UI or product visible, buyer-benefit-driven text, no watermark, sharp typography (bold sans-serif). Optimized for top-1% CTR>" }]
 }`;
+
+const EVIDENCE_FIELDS = [
+  "Gig Title", "Search Tags", "Gig Description", "Profile Bio", "Packages/Pricing",
+  "Buyer Requirements", "Gallery/Images", "Reviews & Ratings", "Response Time", "Seller Level",
+];
+
+const norm = (s: string) => (s || "").toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
+
+// Deterministically confirm each AI-claimed quote really exists in the scraped page.
+function verifyEvidence(raw: any, markdown?: string | null, url?: string, source?: string | null) {
+  const haystack = norm(markdown || "");
+  const list = Array.isArray(raw) ? raw : [];
+  const out = list.map((e: any) => {
+    const field = String(e?.field || "Unknown field");
+    const quote = String(e?.quote || "").trim();
+    const q = norm(quote);
+    const found = !!haystack && q.length >= 8 && haystack.includes(q.slice(0, Math.min(120, q.length)));
+    return {
+      field,
+      used_for: String(e?.used_for || ""),
+      quote,
+      status: found ? "verified" : "needs_manual_confirmation",
+      note: found
+        ? `Read directly from the live page${source ? ` via ${source}` : ""}.`
+        : (quote
+          ? "This text could not be matched in the page we read — confirm it on Fiverr before acting on this check."
+          : "This field was not readable in the scraped page — open it on Fiverr and confirm manually."),
+      source_url: url || null,
+    };
+  });
+  const covered = new Set(out.map((e) => e.field.toLowerCase()));
+  for (const f of EVIDENCE_FIELDS) {
+    if (!covered.has(f.toLowerCase())) {
+      out.push({
+        field: f,
+        used_for: "Not used — no readable data for this field",
+        quote: "",
+        status: "needs_manual_confirmation",
+        note: "Fiverr did not expose this field to the scraper, so no check was based on it.",
+        source_url: url || null,
+      });
+    }
+  }
+  return out;
+}
 
 async function auditOne(opts: {
   niche?: string; issue?: string;
@@ -700,7 +751,8 @@ Rules:
 - 3 image_prompts, each PREMIUM 1280x769, high-CTR, buyer-magnet quality — assume the current thumbnail is weak unless clearly stated otherwise.
 - 5 search tags max, each <20 chars, lowercase.
 - 5–8 critical_issues, mix of severities, each with concrete fix.
-- 3–6 action_plan steps, ordered by impact, with realistic time estimates.`;
+- 3–6 action_plan steps, ordered by impact, with realistic time estimates.
+- source_evidence is MANDATORY: one entry for EVERY Fiverr field you checked (title, tags, description, profile bio, packages/pricing, requirements, gallery/images, reviews, response time, level). "quote" must be text you literally read above — never paraphrase, never invent. If a field was not readable, set quote to "" and status to "needs_manual_confirmation".`;
 
   const raw = await callAI(prompt, system, opts.geminiKey, opts.timeoutMs || 45_000);
   const parsed = safeParseJSON(raw);
@@ -718,6 +770,7 @@ Rules:
   }
   parsed._scraped = scraped;
   parsed._source = item?.source || null;
+  parsed.source_evidence = verifyEvidence(parsed.source_evidence, markdown, url, item?.source || null);
   return parsed;
 }
 

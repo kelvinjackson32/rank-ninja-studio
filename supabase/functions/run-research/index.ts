@@ -649,8 +649,11 @@ REQUIREMENTS:
     // description (features joined) <=100 chars — Fiverr enforces this.
     if (providedTitle) gig_optimization.gig_title = providedTitle;
     {
-      const { capPackages } = await import("../_shared/packageCaps.ts");
-      capPackages(gig_optimization.packages);
+      const { enforcePackages } = await import("../_shared/packageCaps.ts");
+      // Final gate: throws (blocking the save) if any package text is still >100 chars.
+      const enforced = enforcePackages(gig_optimization.packages);
+      gig_optimization.packages = enforced.packages;
+      gig_optimization.package_char_counts = enforced.counts;
     }
 
     // Cap thumbnails to 2
