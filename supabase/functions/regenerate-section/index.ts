@@ -125,7 +125,9 @@ HARD RULES:
 
       const text = await callGemini(prompt, system, geminiKey, true, 20000);
       const newGig = extractJson(text);
-      newGig.packages = capPackages(newGig.packages);
+      const enforcedCascade = enforcePackages(newGig.packages);
+      newGig.packages = enforcedCascade.packages;
+      newGig.package_char_counts = enforcedCascade.counts;
       if (typeof newGig.gig_title === "string" && newGig.gig_title.length > 80) {
         newGig.gig_title = newGig.gig_title.slice(0, 80);
       }
