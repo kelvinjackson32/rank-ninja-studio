@@ -41,6 +41,8 @@ type SavedAudit = {
   gig_audits: RankedGig[];
   failed_gigs: string[];
   blocked_note: string | null;
+  status: string | null;
+  error_message?: string | null;
   created_at: string;
 };
 
@@ -51,6 +53,9 @@ const sevColor = (s: string) =>
 
 const scoreColor = (n: number) =>
   n >= 70 ? "text-success" : n >= 40 ? "text-warning" : "text-destructive";
+
+const isStaleAudit = (audit: SavedAudit) =>
+  audit.status === "processing" && Date.now() - new Date(audit.created_at).getTime() > 4 * 60 * 1000;
 
 const copy = (v: any) => {
   navigator.clipboard.writeText(typeof v === "string" ? v : JSON.stringify(v, null, 2));
@@ -265,7 +270,31 @@ const Audit = () => {
     setRanked(s.gig_audits || []);
     setFailedGigs(s.failed_gigs || []);
     setBlockedNote(s.blocked_note || null);
+    if (isStaleAudit(s)) {
+      toast({ title: "Incomplete audit", description: "This older audit was interrupted before results were saved. Run it again to use the fixed deep-audit flow.", variant: "destructive" });
+    } else if (s.status === "processing") {
+      toast({ title: "Audit still running", description: "The live pages are still being checked. Results will appear here when complete." });
+    } else if (s.status === "error") {
+      toast({ title: "Audit failed", description: s.error_message || "Please run this audit again.", variant: "destructive" });
+    }
     window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const waitForAudit = async (id: string) => {
+    const deadline = Date.now() + 180_000;
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => window.setTimeout(resolve, 2500));
+      const { data, error } = await (supabase as any)
+        .from("saved_audits")
+        .select("*")
+        .eq("id", id)
+        .single();
+      if (error) throw new Error(error.message);
+      const audit = data as SavedAudit;
+      if (audit.status === "error") throw new Error(audit.error_message || "The audit could not be completed.");
+      if (audit.status === "complete") return audit;
+    }
+    throw new Error("The deep audit is still processing. Open it from Saved audits in a moment to see the results.");
   };
 
   const deleteSaved = async (id: string) => {
@@ -291,13 +320,15 @@ const Audit = () => {
       });
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
-      setProfileAudit(data.profileAudit || null);
-      setRanked(data.gigAudits || []);
-      setFailedGigs(data.failedGigs || []);
-      setBlockedNote(data.blockedNote || null);
-      setCurrentId(data.savedId || null);
+      if (!data?.savedId) throw new Error("The audit did not start correctly. Please try again.");
+      setCurrentId(data.savedId);
+      const completed = await waitForAudit(data.savedId);
+      setProfileAudit(completed.profile_audit || null);
+      setRanked(completed.gig_audits || []);
+      setFailedGigs(completed.failed_gigs || []);
+      setBlockedNote(completed.blocked_note || null);
       await loadSaved();
-      toast({ title: "Audit complete & saved", description: `${(data.gigAudits || []).length} gig${(data.gigAudits || []).length === 1 ? "" : "s"} ranked. Find it in Saved audits.` });
+      toast({ title: "Deep audit complete & saved", description: `${(completed.gig_audits || []).length} gig${(completed.gig_audits || []).length === 1 ? "" : "s"} checked and ranked.` });
     } catch (e: any) {
       toast({ title: "Audit failed", description: e.message, variant: "destructive" });
     } finally {
@@ -338,7 +369,7 @@ const Audit = () => {
                     <div className="flex-1 min-w-0">
                       <div className="font-semibold text-sm truncate">{s.label}</div>
                       <div className="text-xs text-muted-foreground truncate">
-                        {new Date(s.created_at).toLocaleString()} · {s.gig_urls?.length || 0} gig{(s.gig_urls?.length || 0) === 1 ? "" : "s"}
+                        {new Date(s.created_at).toLocaleString()} · {s.gig_urls?.length || 0} gig{(s.gig_urls?.length || 0) === 1 ? "" : "s"} · {isStaleAudit(s) ? "Incomplete — run again" : s.status === "processing" ? "Checking…" : s.status === "error" ? "Failed" : "Complete"}
                       </div>
                     </div>
                     <Button variant="ghost" size="sm" onClick={() => openSaved(s)}><RefreshCw className="w-3.5 h-3.5 mr-1" />Open</Button>

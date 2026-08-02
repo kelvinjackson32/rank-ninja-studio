@@ -841,28 +841,20 @@ Deno.serve(async (req) => {
     }
     const auditId = saved.id;
 
-    // Run the slow scraping + AI work in the background so we can respond instantly
-    // and avoid the 150s edge function idle timeout.
-    const work = (async () => {
-      try {
-        await runAuditWork(admin, { profileUrl, username, niche, issue, gigUrls, geminiKey, tokens, auditId, pastedProfile, pastedGig });
-      } catch (e: any) {
-        console.error("background audit error:", e);
-        try {
-          await admin.from("saved_audits").update({
-            status: "error",
-            error_message: e.message || String(e),
-          }).eq("id", auditId);
-        } catch {}
-      }
-    })();
-    // @ts-ignore - EdgeRuntime is available in Supabase Edge Functions
-    if (typeof EdgeRuntime !== "undefined" && EdgeRuntime.waitUntil) {
-      // @ts-ignore
-      EdgeRuntime.waitUntil(work);
+    // Keep this request alive until results are persisted. Detached background work can
+    // be terminated when the edge instance shuts down, leaving empty "processing" rows.
+    try {
+      await runAuditWork(admin, { profileUrl, username, niche, issue, gigUrls, geminiKey, tokens, auditId, pastedProfile, pastedGig });
+    } catch (e: any) {
+      console.error("audit work error:", e);
+      await admin.from("saved_audits").update({
+        status: "error",
+        error_message: e.message || String(e),
+      }).eq("id", auditId);
+      throw e;
     }
 
-    return new Response(JSON.stringify({ success: true, queued: true, savedId: auditId }), {
+    return new Response(JSON.stringify({ success: true, savedId: auditId }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e: any) {
@@ -890,7 +882,7 @@ async function runAuditWork(admin: any, opts: {
     ? await apifyCrawl(combinedStartUrls, {
         maxCrawlDepth: profileUrl ? 1 : 0,
         maxPages: Math.min(8, combinedStartUrls.length + 4),
-        timeoutMs: 70_000,
+        timeoutMs: 55_000,
         tokens,
         admin,
       }).catch((e) => { console.error("combined apify error", (e as Error).message); return [] as ScrapeResult[]; })
@@ -898,13 +890,20 @@ async function runAuditWork(admin: any, opts: {
 
   const scrapedProfile = profileUrl
     ? (combinedCrawl.find((item) => !isLikelyGigUrl(item.url, username) && getFiverrUsername(item.url)?.toLowerCase() === username?.toLowerCase())
-      || await scrapeSingle(profileUrl, { tokens, admin, timeoutMs: 45_000 }))
+      || await scrapeSingle(profileUrl, { tokens, admin, timeoutMs: 20_000 }))
     : null;
   // If Fiverr blocked the scrape but the user pasted their real setup, audit THAT (verified by the user).
-  const profileScrape: ScrapeResult | null = scrapedProfile
-    || (pastedProfile && profileUrl
-      ? { url: profileUrl, markdown: `PASTED BY THE ACCOUNT OWNER (treat as the real current live setup):\n${pastedProfile}`, metadata: {}, source: "direct" as const }
-      : null);
+  const profileScrape: ScrapeResult | null = profileUrl && (scrapedProfile || pastedProfile)
+    ? {
+        url: scrapedProfile?.url || profileUrl,
+        markdown: [
+          scrapedProfile?.markdown && `LIVE FIVERR PAGE:\n${scrapedProfile.markdown}`,
+          pastedProfile && `CURRENT SETUP PASTED BY THE ACCOUNT OWNER:\n${pastedProfile}`,
+        ].filter(Boolean).join("\n\n"),
+        metadata: scrapedProfile?.metadata || {},
+        source: scrapedProfile?.source || "direct" as const,
+      }
+    : null;
 
   const discoveredGigUrls = Array.from(new Set([
     ...extractGigUrlsFromScrape(profileScrape, username),
@@ -917,9 +916,17 @@ async function runAuditWork(admin: any, opts: {
 
   const gigScrapes = await Promise.all(allGigUrls.map(async (url) => {
     const fromCombined = combinedCrawl.find((item) => canonicalUrl(item.url) === canonicalUrl(url));
-    let r = fromCombined || await scrapeSingle(url, { tokens, admin, timeoutMs: 35_000 });
-    if (!r && pastedGig && canonicalUrl(url) === canonicalUrl(allGigUrls[0])) {
-      r = { url, markdown: `PASTED BY THE GIG OWNER (treat as the real current live setup):\n${pastedGig}`, metadata: {}, source: "direct" as const };
+    let r = fromCombined || await scrapeSingle(url, { tokens, admin, timeoutMs: 20_000 });
+    if (pastedGig && canonicalUrl(url) === canonicalUrl(allGigUrls[0])) {
+      r = {
+        url: r?.url || url,
+        markdown: [
+          r?.markdown && `LIVE FIVERR PAGE:\n${r.markdown}`,
+          `CURRENT SETUP PASTED BY THE GIG OWNER:\n${pastedGig}`,
+        ].filter(Boolean).join("\n\n"),
+        metadata: r?.metadata || {},
+        source: r?.source || "direct" as const,
+      };
     }
     return { url, r };
   }));
@@ -928,7 +935,7 @@ async function runAuditWork(admin: any, opts: {
 
   const profileAuditPromise = profileUrl
     ? (profileScrape
-      ? auditOne({ niche, issue, profile: profileScrape, geminiKey, timeoutMs: 40_000 })
+      ? auditOne({ niche, issue, profile: profileScrape, geminiKey, timeoutMs: 32_000 })
           .catch((e: any) => unavailableAudit("PROFILE", profileUrl, `Live Fiverr profile was read but AI generation failed: ${e.message}. Try again in a moment.`))
       : Promise.resolve(unavailableAudit("PROFILE", profileUrl, "Fiverr blocked automated reading of this profile through every available Apify key, Firecrawl, and direct request. Open the profile in a private browser window: if it opens for buyers, paste the exact profile bio into AI Chat and I will audit it line by line.")))
     : Promise.resolve(null);
@@ -936,7 +943,7 @@ async function runAuditWork(admin: any, opts: {
   const gigAuditPromises = gigScrapes.map(async (g) => {
     try {
       const audit = g.r
-        ? await auditOne({ niche, issue, gig: g.r, geminiKey, timeoutMs: 35_000 })
+        ? await auditOne({ niche, issue, gig: g.r, geminiKey, timeoutMs: 32_000 })
             .catch((e: any) => unavailableAudit("GIG", g.url, `Live gig was read but AI generation failed: ${e.message}. Try again in a moment.`))
         : unavailableAudit("GIG", g.url, "Fiverr blocked automated reading of this gig through every available Apify key, Firecrawl, and direct request. Confirm the gig is public, then paste its title, description and packages into AI Chat for a manual audit.");
       const title = g.r?.metadata?.title || g.url.split("/").pop() || g.url;
@@ -979,12 +986,13 @@ async function runAuditWork(admin: any, opts: {
     ? `Fiverr blocked automated reading for ${(profileUrl && !profileScrape ? 1 : 0) + failedGigs.length} page(s) across ${tokens.length} Apify key(s). The audit refuses to invent titles/descriptions it did not read — the flagged pages show an honest "could not verify" result instead of fake data. Tip: copy your real gig/profile text into the "Paste your current setup" box and re-run for a 100% accurate audit.`
     : null;
 
-  await admin.from("saved_audits").update({
+  const { error: saveError } = await admin.from("saved_audits").update({
     profile_audit: profileAudit,
     gig_audits: ranked,
     failed_gigs: failedGigs,
-    skipped_gigs: skippedGigs,
     blocked_note: blockedNote,
     status: "complete",
+    error_message: null,
   }).eq("id", auditId);
+  if (saveError) throw new Error(`Could not save completed audit: ${saveError.message}`);
 }
