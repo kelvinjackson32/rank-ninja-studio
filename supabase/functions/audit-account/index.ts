@@ -901,10 +901,17 @@ async function runAuditWork(admin: any, opts: {
       || await scrapeSingle(profileUrl, { tokens, admin, timeoutMs: 45_000 }))
     : null;
   // If Fiverr blocked the scrape but the user pasted their real setup, audit THAT (verified by the user).
-  const profileScrape: ScrapeResult | null = scrapedProfile
-    || (pastedProfile && profileUrl
-      ? { url: profileUrl, markdown: `PASTED BY THE ACCOUNT OWNER (treat as the real current live setup):\n${pastedProfile}`, metadata: {}, source: "direct" as const }
-      : null);
+  const profileScrape: ScrapeResult | null = profileUrl && (scrapedProfile || pastedProfile)
+    ? {
+        url: scrapedProfile?.url || profileUrl,
+        markdown: [
+          scrapedProfile?.markdown && `LIVE FIVERR PAGE:\n${scrapedProfile.markdown}`,
+          pastedProfile && `CURRENT SETUP PASTED BY THE ACCOUNT OWNER:\n${pastedProfile}`,
+        ].filter(Boolean).join("\n\n"),
+        metadata: scrapedProfile?.metadata || {},
+        source: scrapedProfile?.source || "direct" as const,
+      }
+    : null;
 
   const discoveredGigUrls = Array.from(new Set([
     ...extractGigUrlsFromScrape(profileScrape, username),
@@ -918,8 +925,16 @@ async function runAuditWork(admin: any, opts: {
   const gigScrapes = await Promise.all(allGigUrls.map(async (url) => {
     const fromCombined = combinedCrawl.find((item) => canonicalUrl(item.url) === canonicalUrl(url));
     let r = fromCombined || await scrapeSingle(url, { tokens, admin, timeoutMs: 35_000 });
-    if (!r && pastedGig && canonicalUrl(url) === canonicalUrl(allGigUrls[0])) {
-      r = { url, markdown: `PASTED BY THE GIG OWNER (treat as the real current live setup):\n${pastedGig}`, metadata: {}, source: "direct" as const };
+    if (pastedGig && canonicalUrl(url) === canonicalUrl(allGigUrls[0])) {
+      r = {
+        url: r?.url || url,
+        markdown: [
+          r?.markdown && `LIVE FIVERR PAGE:\n${r.markdown}`,
+          `CURRENT SETUP PASTED BY THE GIG OWNER:\n${pastedGig}`,
+        ].filter(Boolean).join("\n\n"),
+        metadata: r?.metadata || {},
+        source: r?.source || "direct" as const,
+      };
     }
     return { url, r };
   }));
@@ -979,12 +994,13 @@ async function runAuditWork(admin: any, opts: {
     ? `Fiverr blocked automated reading for ${(profileUrl && !profileScrape ? 1 : 0) + failedGigs.length} page(s) across ${tokens.length} Apify key(s). The audit refuses to invent titles/descriptions it did not read — the flagged pages show an honest "could not verify" result instead of fake data. Tip: copy your real gig/profile text into the "Paste your current setup" box and re-run for a 100% accurate audit.`
     : null;
 
-  await admin.from("saved_audits").update({
+  const { error: saveError } = await admin.from("saved_audits").update({
     profile_audit: profileAudit,
     gig_audits: ranked,
     failed_gigs: failedGigs,
-    skipped_gigs: skippedGigs,
     blocked_note: blockedNote,
     status: "complete",
+    error_message: null,
   }).eq("id", auditId);
+  if (saveError) throw new Error(`Could not save completed audit: ${saveError.message}`);
 }
