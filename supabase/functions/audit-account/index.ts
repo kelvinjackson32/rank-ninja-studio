@@ -369,6 +369,18 @@ async function scrapeSingle(
   return null;
 }
 
+async function scrapeWithoutApify(url: string, timeoutMs = 18_000): Promise<ScrapeResult | null> {
+  const normalized = await resolveFiverrUrl(url);
+  const [firecrawl, direct] = await Promise.all([
+    firecrawlScrape(normalized, Math.min(15_000, timeoutMs)).catch(() => null),
+    directFiverrScrape(normalized, Math.min(8_000, timeoutMs)).catch(() => null),
+  ]);
+  if (firecrawl && looksUsable(firecrawl.markdown)) {
+    return { url: normalized, markdown: firecrawl.markdown, metadata: firecrawl.metadata, source: "firecrawl" };
+  }
+  return direct;
+}
+
 function serviceHintFromUrl(raw: string, niche?: string): string {
   if (niche?.trim()) return niche.trim();
   try {
@@ -889,11 +901,13 @@ async function runAuditWork(admin: any, opts: {
     ...gigUrls,
   ]));
 
+  // One account-wide browser run is both deeper and faster than starting a new Actor
+  // for every profile/gig. Secondary readers below never repeat this expensive run.
   const combinedCrawl = combinedStartUrls.length > 0
     ? await apifyCrawl(combinedStartUrls, {
         maxCrawlDepth: profileUrl ? 1 : 0,
-        maxPages: Math.min(8, combinedStartUrls.length + 4),
-        timeoutMs: 55_000,
+        maxPages: Math.min(10, combinedStartUrls.length + 6),
+        timeoutMs: 82_000,
         tokens,
         admin,
       }).catch((e) => { console.error("combined apify error", (e as Error).message); return [] as ScrapeResult[]; })
@@ -901,7 +915,7 @@ async function runAuditWork(admin: any, opts: {
 
   const scrapedProfile = profileUrl
     ? (combinedCrawl.find((item) => !isLikelyGigUrl(item.url, username) && getFiverrUsername(item.url)?.toLowerCase() === username?.toLowerCase())
-      || await scrapeSingle(profileUrl, { tokens, admin, timeoutMs: 20_000 }))
+      || await scrapeWithoutApify(profileUrl, 16_000))
     : null;
   // If Fiverr blocked the scrape but the user pasted their real setup, audit THAT (verified by the user).
   const profileScrape: ScrapeResult | null = profileUrl && (scrapedProfile || pastedProfile)
@@ -927,7 +941,7 @@ async function runAuditWork(admin: any, opts: {
 
   const gigScrapes = await Promise.all(allGigUrls.map(async (url) => {
     const fromCombined = combinedCrawl.find((item) => canonicalUrl(item.url) === canonicalUrl(url));
-    let r = fromCombined || await scrapeSingle(url, { tokens, admin, timeoutMs: 20_000 });
+    let r = fromCombined || await scrapeWithoutApify(url, 16_000);
     if (pastedGig && canonicalUrl(url) === canonicalUrl(allGigUrls[0])) {
       r = {
         url: r?.url || url,
