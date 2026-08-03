@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -234,6 +234,10 @@ const Audit = () => {
   const [gigUrls, setGigUrls] = useState<string[]>([""]);
   const [niche, setNiche] = useState("");
   const [issue, setIssue] = useState("");
+  const [impressions, setImpressions] = useState("");
+  const [clicks, setClicks] = useState("");
+  const [orders, setOrders] = useState("");
+  const [performancePeriod, setPerformancePeriod] = useState("30 days");
   const [pastedGig, setPastedGig] = useState("");
   const [pastedProfile, setPastedProfile] = useState("");
   const [loading, setLoading] = useState(false);
@@ -243,6 +247,22 @@ const Audit = () => {
   const [blockedNote, setBlockedNote] = useState<string | null>(null);
   const [saved, setSaved] = useState<SavedAudit[]>([]);
   const [currentId, setCurrentId] = useState<string | null>(null);
+  const [loadingSeconds, setLoadingSeconds] = useState(0);
+
+  const performanceSummary = useMemo(() => {
+    const parts = [
+      impressions && `${impressions} impressions`,
+      clicks && `${clicks} clicks`,
+      orders && `${orders} orders`,
+    ].filter(Boolean);
+    return parts.length ? `Reported performance (${performancePeriod}): ${parts.join(", ")}.` : "";
+  }, [clicks, impressions, orders, performancePeriod]);
+
+  useEffect(() => {
+    if (!loading) { setLoadingSeconds(0); return; }
+    const timer = window.setInterval(() => setLoadingSeconds((value) => value + 1), 1000);
+    return () => window.clearInterval(timer);
+  }, [loading]);
 
   const updateGig = (i: number, v: string) => setGigUrls((arr) => arr.map((u, idx) => (idx === i ? v : u)));
   const addGig = () => setGigUrls((arr) => [...arr, ""]);
@@ -315,8 +335,9 @@ const Audit = () => {
     }
     setLoading(true); setProfileAudit(null); setRanked([]); setFailedGigs([]); setBlockedNote(null); setCurrentId(null);
     try {
+      const reportedIssue = [issue.trim(), performanceSummary].filter(Boolean).join("\n").slice(0, 2000);
       const { data, error } = await supabase.functions.invoke("audit-account", {
-        body: { profileUrl, gigUrls: cleanGigs, niche, issue, pastedGig, pastedProfile },
+        body: { profileUrl, gigUrls: cleanGigs, niche, issue: reportedIssue, pastedGig, pastedProfile },
       });
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
@@ -417,14 +438,55 @@ const Audit = () => {
               <p className="text-xs text-muted-foreground mt-2">Tip: add known gig links, or paste only the profile and Apify will try to discover public gigs automatically.</p>
             </div>
 
-            <div className="grid md:grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-mono uppercase text-muted-foreground mb-1.5 block">What have you noticed?</label>
+              <Textarea
+                rows={3}
+                maxLength={1500}
+                placeholder="Describe what is going wrong, when it started, what you changed, and what result you expected…"
+                value={issue}
+                onChange={(e) => setIssue(e.target.value)}
+              />
+              <div className="text-[11px] text-muted-foreground text-right mt-1">{issue.length}/1500</div>
+            </div>
+
+            <div className="border border-border rounded-lg p-3 bg-muted/20">
+              <div className="flex flex-col gap-1 mb-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <div className="text-xs font-mono uppercase text-primary">// Performance numbers</div>
+                  <p className="text-xs text-muted-foreground mt-1">Use the same date range from Fiverr Analytics. These numbers help diagnose visibility, click-through and conversion.</p>
+                </div>
+                <select
+                  value={performancePeriod}
+                  onChange={(e) => setPerformancePeriod(e.target.value)}
+                  className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+                  aria-label="Performance period"
+                >
+                  <option>7 days</option>
+                  <option>30 days</option>
+                  <option>90 days</option>
+                </select>
+              </div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <div>
+                  <label className="text-xs font-mono uppercase text-muted-foreground mb-1.5 block">Impressions</label>
+                  <Input inputMode="numeric" placeholder="e.g. 1,250" value={impressions} onChange={(e) => setImpressions(e.target.value.replace(/[^0-9,]/g, "").slice(0, 12))} />
+                </div>
+                <div>
+                  <label className="text-xs font-mono uppercase text-muted-foreground mb-1.5 block">Clicks</label>
+                  <Input inputMode="numeric" placeholder="e.g. 32" value={clicks} onChange={(e) => setClicks(e.target.value.replace(/[^0-9,]/g, "").slice(0, 12))} />
+                </div>
+                <div>
+                  <label className="text-xs font-mono uppercase text-muted-foreground mb-1.5 block">Orders</label>
+                  <Input inputMode="numeric" placeholder="e.g. 1" value={orders} onChange={(e) => setOrders(e.target.value.replace(/[^0-9,]/g, "").slice(0, 12))} />
+                </div>
+              </div>
+            </div>
+
+            <div className="grid md:grid-cols-1 gap-3">
               <div>
                 <label className="text-xs font-mono uppercase text-muted-foreground mb-1.5 block">Niche / Service (optional)</label>
                 <Input placeholder="e.g. AI faceless YouTube shorts" value={niche} onChange={(e) => setNiche(e.target.value)} />
-              </div>
-              <div>
-                <label className="text-xs font-mono uppercase text-muted-foreground mb-1.5 block">What's the problem?</label>
-                <Input placeholder="Low impressions, no orders…" value={issue} onChange={(e) => setIssue(e.target.value)} />
               </div>
             </div>
 
@@ -458,9 +520,9 @@ const Audit = () => {
             </div>
 
             <Button onClick={run} disabled={loading} size="lg" className="w-full bg-gradient-to-r from-primary to-secondary text-primary-foreground font-semibold animate-pulse-glow">
-              {loading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Apify is checking Fiverr live…</> : <><Sparkles className="w-4 h-4 mr-2" /> Run live audit & save</>}
+              {loading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Deep audit running · {Math.floor(loadingSeconds / 60)}:{String(loadingSeconds % 60).padStart(2, "0")}</> : <><Sparkles className="w-4 h-4 mr-2" /> Run live audit & save</>}
             </Button>
-            {loading && <p className="text-xs text-muted-foreground text-center">This can take 60–90s — Apify opens Fiverr pages, then AI writes new title, description, bio, requirements & image prompts.</p>}
+            {loading && <p className="text-xs text-muted-foreground text-center">Reading the live pages first, then comparing your reported performance and preparing exact fixes. The audit is saved automatically even if you leave this page.</p>}
           </CardContent>
         </Card>
 

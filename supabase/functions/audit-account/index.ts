@@ -308,6 +308,10 @@ async function apifyCrawl(
       console.warn(`Apify key ${t.id} returned no usable items — trying next key`);
     } catch (e) {
       console.error("Apify call error", (e as Error).message);
+      // A browser timeout is normally a Fiverr/actor issue, not a bad API key.
+      // Retrying the same crawl with every stored key can consume the entire edge
+      // runtime and leave the saved audit permanently stuck in "processing".
+      if (/timed out|timeout|abort/i.test((e as Error).message)) break;
       continue;
     }
   }
@@ -621,7 +625,12 @@ async function callAI(prompt: string, system: string, geminiKey: string, timeout
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: system }] },
       contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.8, maxOutputTokens: 8192 },
+      generationConfig: {
+        temperature: 0.55,
+        maxOutputTokens: 6144,
+        responseMimeType: "application/json",
+        thinkingConfig: { thinkingBudget: 0 },
+      },
     }),
     signal: AbortSignal.timeout(timeoutMs),
   });
@@ -814,10 +823,10 @@ Deno.serve(async (req) => {
     const body = await req.json();
     const profileUrl: string | undefined = normalizeProfileInput(body.profileUrl);
     const username = getFiverrUsername(profileUrl);
-    const niche: string | undefined = body.niche?.trim();
+    const niche: string | undefined = String(body.niche || "").trim().slice(0, 200) || undefined;
     const pastedProfile: string = String(body.pastedProfile || "").trim().slice(0, 12000);
     const pastedGig: string = String(body.pastedGig || "").trim().slice(0, 12000);
-    const issue: string | undefined = body.issue?.trim();
+    const issue: string | undefined = String(body.issue || "").trim().slice(0, 2000) || undefined;
     const gigUrls: string[] = Array.isArray(body.gigUrls)
       ? body.gigUrls.map((u: string) => canonicalUrl(u)).filter(Boolean)
       : (body.gigUrl?.trim() ? [canonicalUrl(body.gigUrl.trim())] : []);
@@ -905,17 +914,25 @@ async function runAuditWork(admin: any, opts: {
   // for every profile/gig. Secondary readers below never repeat this expensive run.
   const combinedCrawl = combinedStartUrls.length > 0
     ? await apifyCrawl(combinedStartUrls, {
-        maxCrawlDepth: profileUrl ? 1 : 0,
-        maxPages: Math.min(10, combinedStartUrls.length + 6),
-        timeoutMs: 82_000,
+        maxCrawlDepth: profileUrl && gigUrls.length === 0 ? 1 : 0,
+        maxPages: Math.min(6, combinedStartUrls.length + 3),
+        timeoutMs: 48_000,
         tokens,
         admin,
       }).catch((e) => { console.error("combined apify error", (e as Error).message); return [] as ScrapeResult[]; })
     : [];
 
+  // Persist a heartbeat after the expensive browser step. This distinguishes a
+  // healthy long-running audit from an abandoned job in the Saved audits UI.
+  await admin.from("saved_audits").update({
+    error_message: combinedCrawl.length > 0
+      ? `Live scan complete: ${combinedCrawl.length} page(s) read. Preparing diagnosis…`
+      : "Live scan was blocked; trying backup readers and pasted account details…",
+  }).eq("id", auditId);
+
   const scrapedProfile = profileUrl
     ? (combinedCrawl.find((item) => !isLikelyGigUrl(item.url, username) && getFiverrUsername(item.url)?.toLowerCase() === username?.toLowerCase())
-      || await scrapeWithoutApify(profileUrl, 16_000))
+      || await scrapeWithoutApify(profileUrl, 11_000))
     : null;
   // If Fiverr blocked the scrape but the user pasted their real setup, audit THAT (verified by the user).
   const profileScrape: ScrapeResult | null = profileUrl && (scrapedProfile || pastedProfile)
@@ -941,7 +958,7 @@ async function runAuditWork(admin: any, opts: {
 
   const gigScrapes = await Promise.all(allGigUrls.map(async (url) => {
     const fromCombined = combinedCrawl.find((item) => canonicalUrl(item.url) === canonicalUrl(url));
-    let r = fromCombined || await scrapeWithoutApify(url, 16_000);
+    let r = fromCombined || await scrapeWithoutApify(url, 11_000);
     if (pastedGig && canonicalUrl(url) === canonicalUrl(allGigUrls[0])) {
       r = {
         url: r?.url || url,
@@ -960,7 +977,7 @@ async function runAuditWork(admin: any, opts: {
 
   const profileAuditPromise = profileUrl
     ? (profileScrape
-      ? auditOne({ niche, issue, profile: profileScrape, geminiKey, timeoutMs: 32_000 })
+      ? auditOne({ niche, issue, profile: profileScrape, geminiKey, timeoutMs: 28_000 })
           .catch((e: any) => unavailableAudit("PROFILE", profileUrl, `Live Fiverr profile was read but AI generation failed: ${e.message}. Try again in a moment.`))
       : Promise.resolve(unavailableAudit("PROFILE", profileUrl, "Fiverr blocked automated reading of this profile through every available Apify key, Firecrawl, and direct request. Open the profile in a private browser window: if it opens for buyers, paste the exact profile bio into AI Chat and I will audit it line by line.")))
     : Promise.resolve(null);
@@ -968,7 +985,7 @@ async function runAuditWork(admin: any, opts: {
   const gigAuditPromises = gigScrapes.map(async (g) => {
     try {
       const audit = g.r
-        ? await auditOne({ niche, issue, gig: g.r, geminiKey, timeoutMs: 32_000 })
+        ? await auditOne({ niche, issue, gig: g.r, geminiKey, timeoutMs: 28_000 })
             .catch((e: any) => unavailableAudit("GIG", g.url, `Live gig was read but AI generation failed: ${e.message}. Try again in a moment.`))
         : unavailableAudit("GIG", g.url, "Fiverr blocked automated reading of this gig through every available Apify key, Firecrawl, and direct request. Confirm the gig is public, then paste its title, description and packages into AI Chat for a manual audit.");
       const title = g.r?.metadata?.title || g.url.split("/").pop() || g.url;
