@@ -841,20 +841,31 @@ Deno.serve(async (req) => {
     }
     const auditId = saved.id;
 
-    // Keep this request alive until results are persisted. Detached background work can
-    // be terminated when the edge instance shuts down, leaving empty "processing" rows.
-    try {
-      await runAuditWork(admin, { profileUrl, username, niche, issue, gigUrls, geminiKey, tokens, auditId, pastedProfile, pastedGig });
-    } catch (e: any) {
+    // Deep browser scraping can outlive the HTTP gateway timeout. waitUntil keeps the
+    // edge worker alive after we immediately return the saved audit ID to the browser.
+    // The frontend then polls this row until it becomes complete or error.
+    const auditWork = runAuditWork(admin, {
+      profileUrl, username, niche, issue, gigUrls, geminiKey, tokens, auditId, pastedProfile, pastedGig,
+    }).catch(async (e: any) => {
       console.error("audit work error:", e);
       await admin.from("saved_audits").update({
         status: "error",
-        error_message: e.message || String(e),
+        error_message: String(e?.message || e || "Audit failed").slice(0, 1000),
       }).eq("id", auditId);
-      throw e;
+    });
+
+    const edgeRuntime = (globalThis as typeof globalThis & {
+      EdgeRuntime?: { waitUntil: (promise: Promise<unknown>) => void };
+    }).EdgeRuntime;
+    if (edgeRuntime?.waitUntil) {
+      edgeRuntime.waitUntil(auditWork);
+    } else {
+      // Local/test runtimes may not expose EdgeRuntime. Await there so work is not lost.
+      await auditWork;
     }
 
-    return new Response(JSON.stringify({ success: true, savedId: auditId }), {
+    return new Response(JSON.stringify({ success: true, savedId: auditId, status: "processing" }), {
+      status: 202,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e: any) {
