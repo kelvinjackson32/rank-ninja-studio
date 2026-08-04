@@ -86,9 +86,17 @@ const parseLinks = (raw: string) => {
   return { profileUrl, gigUrls: Array.from(new Set(gigUrls)) };
 };
 
+const toneClass: Record<string, string> = {
+  primary: "text-primary",
+  destructive: "text-destructive",
+  warning: "text-warning",
+  success: "text-success",
+  secondary: "text-secondary",
+};
+
 const Section = ({ title, icon: Icon, tone = "primary", children }: { title: string; icon: any; tone?: string; children: React.ReactNode }) => (
   <div>
-    <div className={`font-mono text-xs uppercase mb-2 flex items-center gap-2 text-${tone}`}>
+    <div className={`font-mono text-xs uppercase mb-2 flex items-center gap-2 ${toneClass[tone] ?? toneClass.primary}`}>
       <Icon className="w-4 h-4" /> {title}
     </div>
     {children}
