@@ -140,6 +140,64 @@ async function scrapeWithFirecrawl(query: string): Promise<any[]> {
   return items;
 }
 
+class TransientAIError extends Error {}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+async function callAIOnce(
+  prompt: string,
+  system: string,
+  geminiKey: string,
+  model: string,
+  opts: { json?: boolean; temperature?: number; maxOutputTokens?: number } = {},
+): Promise<string> {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(geminiKey)}`;
+  let resp: Response;
+  try {
+    resp = await fetchWithTimeout(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: system }] },
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: {
+          temperature: opts.temperature ?? 0.65,
+          maxOutputTokens: opts.maxOutputTokens ?? 16384,
+          ...(opts.json ? { responseMimeType: "application/json" } : {}),
+        },
+      }),
+    }, AI_TIMEOUT_MS);
+  } catch (e: any) {
+    // network hiccup / timeout — worth retrying
+    throw new TransientAIError(e?.message || "Gemini request failed (network/timeout)");
+  }
+  if (resp.status === 429) {
+    const txt = await resp.text();
+    const isNoQuota = /limit:\s*0|quota exceeded|free_tier_requests/i.test(txt);
+    if (isNoQuota) {
+      throw new Error("Gemini key is recognized, but its Google project has no Gemini generation quota. Use a key from a Google AI Studio project with Gemini API quota/billing.");
+    }
+    throw new TransientAIError("Gemini rate limit hit — retrying shortly.");
+  }
+  if (resp.status === 401 || resp.status === 403) {
+    throw new Error("Gemini API key invalid or unauthorized. Update it in Settings → AI Generation.");
+  }
+  if (resp.status === 500 || resp.status === 502 || resp.status === 503 || resp.status === 504) {
+    throw new TransientAIError(`Gemini temporarily unavailable (${resp.status}).`);
+  }
+  if (!resp.ok) {
+    const txt = await resp.text();
+    throw new Error(`Gemini error ${resp.status}: ${txt.slice(0, 300)}`);
+  }
+  const data = await resp.json();
+  const candidate = data.candidates?.[0];
+  const text = candidate?.content?.parts?.map((p: any) => p.text).filter(Boolean).join("\n") || "";
+  if (!text) {
+    throw new TransientAIError(`Gemini returned an empty response${candidate?.finishReason ? ` (${candidate.finishReason})` : ""}.`);
+  }
+  return text;
+}
+
 async function callAI(
   prompt: string,
   system: string,
@@ -150,40 +208,24 @@ async function callAI(
   if (!geminiKey) {
     throw new Error("No Gemini API key configured. Open Settings → AI Generation and paste your Google Gemini API key (free at https://aistudio.google.com/apikey).");
   }
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(geminiKey)}`;
-  const resp = await fetchWithTimeout(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      systemInstruction: { parts: [{ text: system }] },
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: opts.temperature ?? 0.65,
-          maxOutputTokens: opts.maxOutputTokens ?? 16384,
-          ...(opts.json ? { responseMimeType: "application/json" } : {}),
-        },
-    }),
-  }, AI_TIMEOUT_MS);
-  if (resp.status === 429) {
-    const txt = await resp.text();
-    const isNoQuota = /limit:\s*0|quota exceeded|free_tier_requests/i.test(txt);
-    throw new Error(isNoQuota
-      ? "Gemini key is recognized, but its Google project has no Gemini generation quota. Use a key from a Google AI Studio project with Gemini API quota/billing."
-      : "Gemini quota/rate limit hit for this key. Wait a moment or switch to another Google project key.");
+  // Try the requested model, then progressively lighter fallbacks — each with backoff.
+  const models = Array.from(new Set([model, "gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]));
+  let lastErr: any;
+  for (let m = 0; m < models.length; m++) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        return await callAIOnce(prompt, system, geminiKey, models[m], opts);
+      } catch (e: any) {
+        lastErr = e;
+        if (!(e instanceof TransientAIError)) throw e; // hard failures: key/quota — surface now
+        console.warn(`Gemini ${models[m]} attempt ${attempt + 1} failed: ${e.message}`);
+        if (attempt < 2) await sleep(1200 * Math.pow(2, attempt) + Math.floor(Math.random() * 400));
+      }
+    }
   }
-  if (resp.status === 401 || resp.status === 403) {
-    throw new Error("Gemini API key invalid or unauthorized. Update it in Settings → AI Generation.");
-  }
-  if (!resp.ok) {
-    const txt = await resp.text();
-    throw new Error(`Gemini error ${resp.status}: ${txt.slice(0, 300)}`);
-  }
-  const data = await resp.json();
-  const candidate = data.candidates?.[0];
-  const text = candidate?.content?.parts?.map((p: any) => p.text).filter(Boolean).join("\n") || "";
-  if (!text) throw new Error(`Gemini returned an empty response${candidate?.finishReason ? ` (${candidate.finishReason})` : ""}.`);
-  return text;
+  throw new Error(lastErr?.message || "Gemini failed after multiple retries.");
 }
+
 
 async function getUserGeminiKey(admin: any, userId: string): Promise<string> {
   const { data } = await admin
@@ -238,20 +280,29 @@ function extractJson(text: string): any {
 
 async function generateJson(prompt: string, system: string, geminiKey: string, label: string): Promise<any> {
   const jsonSystem = `${system}\nReturn one valid JSON object only. Do not include markdown, comments, explanations, or text outside JSON.`;
-  let raw = await callAI(prompt, jsonSystem, geminiKey, "gemini-2.5-flash", { json: true });
-  try {
-    return extractJson(raw);
-  } catch (firstError: any) {
-    console.warn(`${label} JSON parse failed; retrying with stricter prompt:`, firstError?.message || firstError);
-    raw = await callAI(
-      `Your last response was not valid JSON. Regenerate the answer from scratch as ONE complete valid JSON object only. No markdown fences, no intro, no notes.\n\nOriginal task:\n${prompt}`,
-      jsonSystem,
-      geminiKey,
-      "gemini-2.5-flash",
-      { json: true, temperature: 0.25, maxOutputTokens: 20000 },
-    );
-    return extractJson(raw);
+  const passes: Array<{ prompt: string; opts: any }> = [
+    { prompt, opts: { json: true } },
+    {
+      prompt: `Your last response was not valid JSON. Regenerate the answer from scratch as ONE complete valid JSON object only. No markdown fences, no intro, no notes.\n\nOriginal task:\n${prompt}`,
+      opts: { json: true, temperature: 0.25, maxOutputTokens: 20000 },
+    },
+    {
+      prompt: `Return ONLY a single complete JSON object. Keep every field but write shorter values so the JSON is never truncated.\n\nOriginal task:\n${prompt}`,
+      opts: { json: true, temperature: 0.2, maxOutputTokens: 12000 },
+    },
+  ];
+  let lastError: any;
+  for (let i = 0; i < passes.length; i++) {
+    try {
+      const raw = await callAI(passes[i].prompt, jsonSystem, geminiKey, "gemini-2.5-flash", passes[i].opts);
+      return extractJson(raw);
+    } catch (e: any) {
+      lastError = e;
+      if (/invalid or unauthorized|no Gemini generation quota|No Gemini API key/i.test(e?.message || "")) throw e;
+      console.warn(`${label} pass ${i + 1} failed: ${e?.message || e}`);
+    }
   }
+  throw lastError;
 }
 
 Deno.serve(async (req) => {
