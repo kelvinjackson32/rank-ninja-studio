@@ -672,6 +672,8 @@ Generate the complete Fiverr profile and gig package in ONE valid JSON object wi
 
 REQUIREMENTS:
 - profile_optimization.short_bio <=150 chars. profile_optimization.about <=500 chars. profile_strength.score must equal the breakdown sum.
+- ONE PROFILE, MANY GIGS: a Fiverr account has only ONE profile title/bio/About for the whole account, but the seller will run 3-4 RELATED gigs under it. So profile_title, short_bio and about must be an UMBRELLA over the specialty of gig_optimization.gig_title (use its real service words) while staying broad enough to also cover 2-3 closely related gigs in the same niche${providedTitle ? ` — the locked title "${providedTitle}" must be recognisable in the profile copy` : ""}. Never write the profile as a copy of a single gig description, and never promise a service outside this niche.
+- profile_optimization.profile_strength.tips must include one tip naming the 2-3 related gig ideas the seller should add next so the profile and gig line-up stay consistent.
 - title_variations: EXACTLY 6 items, each <=80 chars.
 - gig_metadata: 4-6 niche-specific items.
 - buyer_requirements: 4-6 niche-specific items.

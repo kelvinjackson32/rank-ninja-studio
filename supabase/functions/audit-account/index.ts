@@ -760,10 +760,28 @@ function verifyEvidence(raw: any, markdown?: string | null, url?: string, source
   return out;
 }
 
+function cleanGigTitle(raw?: string | null): string {
+  let t = String(raw || "").replace(/\s+/g, " ").trim();
+  t = t.replace(/\s*\|\s*Fiverr.*$/i, "").replace(/^Fiverr\s*[-|:]\s*/i, "").trim();
+  return t.slice(0, 90);
+}
+
+function gigTitleFromScrape(url: string, r?: ScrapeResult | null): string {
+  const fromMeta = cleanGigTitle(r?.metadata?.title);
+  if (fromMeta && fromMeta.length > 8) return fromMeta;
+  const md = r?.markdown || "";
+  const heading = md.match(/^#{1,3}\s*(.+)$/m)?.[1] || md.match(/I will [^\n.]{10,80}/i)?.[0];
+  const fromMd = cleanGigTitle(heading);
+  if (fromMd && fromMd.length > 8) return fromMd;
+  const slug = url.split("/").pop() || url;
+  return cleanGigTitle(decodeURIComponent(slug).replace(/-/g, " "));
+}
+
 async function auditOne(opts: {
   niche?: string; issue?: string;
   profile?: ScrapeResult | null;
   gig?: ScrapeResult | null;
+  accountGigTitles?: string[];
   geminiKey: string;
   timeoutMs?: number;
 }) {
@@ -775,7 +793,29 @@ async function auditOne(opts: {
 
   const system = `You are a Fiverr ranking expert who has reverse-engineered what makes top-1% sellers convert. Output ONLY valid JSON, no markdown fences, no commentary.`;
 
-  const scrapedBlock = `=== LIVE SCRAPED FIVERR CONTENT VIA ${item?.source?.toUpperCase() || "SCRAPER"} (${url}) ===\n${markdown}\n`;
+  const gigTitles = (opts.accountGigTitles || []).filter(Boolean);
+  const accountServicesBlock = gigTitles.length
+    ? `\n=== ALL LIVE GIGS CURRENTLY SET UP ON THIS SAME FIVERR ACCOUNT (${gigTitles.length}) ===\n${gigTitles.map((t, i) => `${i + 1}. ${t}`).join("\n")}\n`
+    : "";
+
+  const oneProfileRule = target === "PROFILE"
+    ? `\n=== ONE PROFILE, MANY GIGS RULE (CRITICAL) ===
+A Fiverr account has ONE profile title/bio/description for the WHOLE account, but can hold 3-4 related gigs. ${gigTitles.length > 1
+        ? `This account currently sells ${gigTitles.length} gigs (listed above).`
+        : gigTitles.length === 1
+          ? `This account currently sells 1 gig (listed above).`
+          : `The live gig list could not be read — say so instead of inventing services.`}
+- rewrites.profile_title and rewrites.profile_description MUST be an UMBRELLA for the exact services in the gig list above: use the real service words from those gig titles, cover ALL of them in one coherent positioning, and never describe a service the account does not actually sell.
+- If the gigs are related, name the shared specialty first (e.g. the common niche), then mention the specific offers as what the seller delivers.
+- NEVER write the profile as if it only sells one of the gigs, and never contradict a gig title — a mismatch makes the seller look like they do not understand their own service.
+- Flag it as a critical_issue if the current profile bio ignores, contradicts, or only half-covers the live gigs above.
+- If the gig titles cover unrelated niches, say so plainly and recommend which gigs to keep/drop so the profile can stay focused.\n`
+    : accountServicesBlock
+      ? `\n=== ACCOUNT CONTEXT ===\nThis gig sits on an account that also runs the other gigs listed above. Keep the rewrite distinct from them (no cannibalising the same keyword) while staying inside the same specialty.\n`
+      : "";
+
+  const scrapedBlock = `=== LIVE SCRAPED FIVERR CONTENT VIA ${item?.source?.toUpperCase() || "SCRAPER"} (${url}) ===\n${markdown}\n${accountServicesBlock}${oneProfileRule}`;
+
 
   const prompt = `Audit this Fiverr ${target}. Return STRICT JSON ONLY (no fences) in this EXACT shape:
 ${AUDIT_SHAPE}
@@ -793,7 +833,7 @@ Rules:
 - Be brutally honest, specific, and actionable. No fluff.
 - Use the ACTUAL scraped Fiverr setup. Quote the exact existing weak title / bio / description / package / image / trust signal you see, THEN rewrite it.
 - rewrites.gig_title MUST be a NEW perfect gig title (never repeat the current one).
-- rewrites.gig_description is about the GIG service (what buyer gets). rewrites.profile_description is about the SELLER (bio). They must be clearly different.
+- rewrites.gig_description is about the GIG service (what buyer gets). rewrites.profile_description is about the SELLER (bio) and must be ONE umbrella that fits every live gig on the account (there is only one profile description for all 3-4 gigs). They must be clearly different.
 - rewrites.buyer_requirements = the questions to ask buyer at order start, tailored to this niche.
 - top_issues_summary = 3-6 short bullets naming the biggest issues affecting this account (used as visible warning chips).
 - account_edits = concrete list of "go here → change this" edits inside Fiverr, ordered by priority.
@@ -1005,9 +1045,14 @@ async function runAuditWork(admin: any, opts: {
 
   const failedGigs = gigScrapes.filter((g) => !g.r).map((g) => g.url);
 
+  // ONE profile description must cover EVERY gig on the account, so collect the real live gig titles first.
+  const accountGigTitles = gigScrapes
+    .filter((g) => g.r)
+    .map((g) => gigTitleFromScrape(g.url, g.r));
+
   const profileAuditPromise = profileUrl
     ? (profileScrape
-      ? auditOne({ niche, issue, profile: profileScrape, geminiKey, timeoutMs: 28_000 })
+      ? auditOne({ niche, issue, profile: profileScrape, accountGigTitles, geminiKey, timeoutMs: 28_000 })
           .catch((e: any) => unavailableAudit("PROFILE", profileUrl, `Live Fiverr profile was read but AI generation failed: ${e.message}. Try again in a moment.`))
       : Promise.resolve(unavailableAudit("PROFILE", profileUrl, "Fiverr blocked automated reading of this profile through every available Apify key, Firecrawl, and direct request. Open the profile in a private browser window: if it opens for buyers, paste the exact profile bio into AI Chat and I will audit it line by line.")))
     : Promise.resolve(null);
@@ -1015,8 +1060,9 @@ async function runAuditWork(admin: any, opts: {
   const gigAuditPromises = gigScrapes.map(async (g) => {
     try {
       const audit = g.r
-        ? await auditOne({ niche, issue, gig: g.r, geminiKey, timeoutMs: 28_000 })
+        ? await auditOne({ niche, issue, gig: g.r, accountGigTitles, geminiKey, timeoutMs: 28_000 })
             .catch((e: any) => unavailableAudit("GIG", g.url, `Live gig was read but AI generation failed: ${e.message}. Try again in a moment.`))
+
         : unavailableAudit("GIG", g.url, "Fiverr blocked automated reading of this gig through every available Apify key, Firecrawl, and direct request. Confirm the gig is public, then paste its title, description and packages into AI Chat for a manual audit.");
       const title = g.r?.metadata?.title || g.url.split("/").pop() || g.url;
       return { url: g.url, title, audit };
