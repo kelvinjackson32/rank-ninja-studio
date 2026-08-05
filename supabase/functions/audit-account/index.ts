@@ -833,7 +833,7 @@ Rules:
 - Be brutally honest, specific, and actionable. No fluff.
 - Use the ACTUAL scraped Fiverr setup. Quote the exact existing weak title / bio / description / package / image / trust signal you see, THEN rewrite it.
 - rewrites.gig_title MUST be a NEW perfect gig title (never repeat the current one).
-- rewrites.gig_description is about the GIG service (what buyer gets). rewrites.profile_description is about the SELLER (bio). They must be clearly different.
+- rewrites.gig_description is about the GIG service (what buyer gets). rewrites.profile_description is about the SELLER (bio) and must be ONE umbrella that fits every live gig on the account (there is only one profile description for all 3-4 gigs). They must be clearly different.
 - rewrites.buyer_requirements = the questions to ask buyer at order start, tailored to this niche.
 - top_issues_summary = 3-6 short bullets naming the biggest issues affecting this account (used as visible warning chips).
 - account_edits = concrete list of "go here → change this" edits inside Fiverr, ordered by priority.
