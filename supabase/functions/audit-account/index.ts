@@ -1045,9 +1045,14 @@ async function runAuditWork(admin: any, opts: {
 
   const failedGigs = gigScrapes.filter((g) => !g.r).map((g) => g.url);
 
+  // ONE profile description must cover EVERY gig on the account, so collect the real live gig titles first.
+  const accountGigTitles = gigScrapes
+    .filter((g) => g.r)
+    .map((g) => gigTitleFromScrape(g.url, g.r));
+
   const profileAuditPromise = profileUrl
     ? (profileScrape
-      ? auditOne({ niche, issue, profile: profileScrape, geminiKey, timeoutMs: 28_000 })
+      ? auditOne({ niche, issue, profile: profileScrape, accountGigTitles, geminiKey, timeoutMs: 28_000 })
           .catch((e: any) => unavailableAudit("PROFILE", profileUrl, `Live Fiverr profile was read but AI generation failed: ${e.message}. Try again in a moment.`))
       : Promise.resolve(unavailableAudit("PROFILE", profileUrl, "Fiverr blocked automated reading of this profile through every available Apify key, Firecrawl, and direct request. Open the profile in a private browser window: if it opens for buyers, paste the exact profile bio into AI Chat and I will audit it line by line.")))
     : Promise.resolve(null);
@@ -1055,8 +1060,9 @@ async function runAuditWork(admin: any, opts: {
   const gigAuditPromises = gigScrapes.map(async (g) => {
     try {
       const audit = g.r
-        ? await auditOne({ niche, issue, gig: g.r, geminiKey, timeoutMs: 28_000 })
+        ? await auditOne({ niche, issue, gig: g.r, accountGigTitles, geminiKey, timeoutMs: 28_000 })
             .catch((e: any) => unavailableAudit("GIG", g.url, `Live gig was read but AI generation failed: ${e.message}. Try again in a moment.`))
+
         : unavailableAudit("GIG", g.url, "Fiverr blocked automated reading of this gig through every available Apify key, Firecrawl, and direct request. Confirm the gig is public, then paste its title, description and packages into AI Chat for a manual audit.");
       const title = g.r?.metadata?.title || g.url.split("/").pop() || g.url;
       return { url: g.url, title, audit };
