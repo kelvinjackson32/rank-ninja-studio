@@ -305,8 +305,6 @@ async function generateJson(prompt: string, system: string, geminiKey: string, l
   throw lastError;
 }
 
-}
-
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS")
     return new Response(null, { headers: corsHeaders });
