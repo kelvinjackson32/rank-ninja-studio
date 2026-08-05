@@ -280,20 +280,31 @@ function extractJson(text: string): any {
 
 async function generateJson(prompt: string, system: string, geminiKey: string, label: string): Promise<any> {
   const jsonSystem = `${system}\nReturn one valid JSON object only. Do not include markdown, comments, explanations, or text outside JSON.`;
-  let raw = await callAI(prompt, jsonSystem, geminiKey, "gemini-2.5-flash", { json: true });
-  try {
-    return extractJson(raw);
-  } catch (firstError: any) {
-    console.warn(`${label} JSON parse failed; retrying with stricter prompt:`, firstError?.message || firstError);
-    raw = await callAI(
-      `Your last response was not valid JSON. Regenerate the answer from scratch as ONE complete valid JSON object only. No markdown fences, no intro, no notes.\n\nOriginal task:\n${prompt}`,
-      jsonSystem,
-      geminiKey,
-      "gemini-2.5-flash",
-      { json: true, temperature: 0.25, maxOutputTokens: 20000 },
-    );
-    return extractJson(raw);
+  const passes: Array<{ prompt: string; opts: any }> = [
+    { prompt, opts: { json: true } },
+    {
+      prompt: `Your last response was not valid JSON. Regenerate the answer from scratch as ONE complete valid JSON object only. No markdown fences, no intro, no notes.\n\nOriginal task:\n${prompt}`,
+      opts: { json: true, temperature: 0.25, maxOutputTokens: 20000 },
+    },
+    {
+      prompt: `Return ONLY a single complete JSON object. Keep every field but write shorter values so the JSON is never truncated.\n\nOriginal task:\n${prompt}`,
+      opts: { json: true, temperature: 0.2, maxOutputTokens: 12000 },
+    },
+  ];
+  let lastError: any;
+  for (let i = 0; i < passes.length; i++) {
+    try {
+      const raw = await callAI(passes[i].prompt, jsonSystem, geminiKey, "gemini-2.5-flash", passes[i].opts);
+      return extractJson(raw);
+    } catch (e: any) {
+      lastError = e;
+      if (/invalid or unauthorized|no Gemini generation quota|No Gemini API key/i.test(e?.message || "")) throw e;
+      console.warn(`${label} pass ${i + 1} failed: ${e?.message || e}`);
+    }
   }
+  throw lastError;
+}
+
 }
 
 Deno.serve(async (req) => {
