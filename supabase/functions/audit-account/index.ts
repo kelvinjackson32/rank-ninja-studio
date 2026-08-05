@@ -614,40 +614,69 @@ function unavailableAudit(target: "PROFILE" | "GIG", url: string, reason: string
   };
 }
 
-async function callAI(prompt: string, system: string, geminiKey: string, timeoutMs = 45_000): Promise<string> {
-  if (!geminiKey) {
-    throw new Error("No Gemini API key configured. Open Settings → AI Generation and paste your Google Gemini API key.");
+async function callAIOnce(prompt: string, system: string, geminiKey: string, model: string, timeoutMs: number): Promise<string> {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(geminiKey)}`;
+  let resp: Response;
+  try {
+    resp = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: system }] },
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: {
+          temperature: 0.55,
+          maxOutputTokens: 6144,
+          responseMimeType: "application/json",
+          thinkingConfig: { thinkingBudget: 0 },
+        },
+      }),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (e: any) {
+    throw new Error(`__TRANSIENT__${e?.message || "Gemini request failed (network/timeout)"}`);
   }
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(geminiKey)}`;
-  const resp = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      systemInstruction: { parts: [{ text: system }] },
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: {
-        temperature: 0.55,
-        maxOutputTokens: 6144,
-        responseMimeType: "application/json",
-        thinkingConfig: { thinkingBudget: 0 },
-      },
-    }),
-    signal: AbortSignal.timeout(timeoutMs),
-  });
   if (resp.status === 429) {
     const txt = await resp.text();
     const isNoQuota = /limit:\s*0|quota exceeded|free_tier_requests/i.test(txt);
-    throw new Error(isNoQuota
-      ? "Gemini key is recognized, but its Google project has no Gemini generation quota. Use a key from a Google AI Studio project with Gemini API quota/billing."
-      : "Gemini quota/rate limit hit for this key. Wait a moment or switch to another Google project key.");
+    if (isNoQuota) throw new Error("Gemini key is recognized, but its Google project has no Gemini generation quota. Use a key from a Google AI Studio project with Gemini API quota/billing.");
+    throw new Error("__TRANSIENT__Gemini rate limit hit — retrying.");
   }
   if (resp.status === 401 || resp.status === 403) {
     throw new Error("Gemini API key invalid or unauthorized. Update it in Settings → AI Generation.");
   }
+  if ([500, 502, 503, 504].includes(resp.status)) {
+    throw new Error(`__TRANSIENT__Gemini temporarily unavailable (${resp.status}).`);
+  }
   if (!resp.ok) throw new Error(`Gemini ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
   const data = await resp.json();
-  return data.candidates?.[0]?.content?.parts?.map((p: any) => p.text).filter(Boolean).join("\n") || "";
+  const text = data.candidates?.[0]?.content?.parts?.map((p: any) => p.text).filter(Boolean).join("\n") || "";
+  if (!text) throw new Error("__TRANSIENT__Gemini returned an empty response.");
+  return text;
 }
+
+async function callAI(prompt: string, system: string, geminiKey: string, timeoutMs = 45_000): Promise<string> {
+  if (!geminiKey) {
+    throw new Error("No Gemini API key configured. Open Settings → AI Generation and paste your Google Gemini API key.");
+  }
+  const models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
+  let lastErr: any;
+  for (const model of models) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        return await callAIOnce(prompt, system, geminiKey, model, timeoutMs);
+      } catch (e: any) {
+        lastErr = e;
+        const msg = String(e?.message || "");
+        if (!msg.startsWith("__TRANSIENT__")) throw e;
+        console.warn(`audit AI ${model} attempt ${attempt + 1}: ${msg.replace("__TRANSIENT__", "")}`);
+        if (attempt === 0) await new Promise((r) => setTimeout(r, 1500));
+      }
+    }
+  }
+  throw new Error(String(lastErr?.message || "Gemini failed after retries.").replace("__TRANSIENT__", ""));
+}
+
 
 function safeParseJSON(raw: string): any {
   const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
