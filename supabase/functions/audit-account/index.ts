@@ -760,10 +760,28 @@ function verifyEvidence(raw: any, markdown?: string | null, url?: string, source
   return out;
 }
 
+function cleanGigTitle(raw?: string | null): string {
+  let t = String(raw || "").replace(/\s+/g, " ").trim();
+  t = t.replace(/\s*\|\s*Fiverr.*$/i, "").replace(/^Fiverr\s*[-|:]\s*/i, "").trim();
+  return t.slice(0, 90);
+}
+
+function gigTitleFromScrape(url: string, r?: ScrapeResult | null): string {
+  const fromMeta = cleanGigTitle(r?.metadata?.title);
+  if (fromMeta && fromMeta.length > 8) return fromMeta;
+  const md = r?.markdown || "";
+  const heading = md.match(/^#{1,3}\s*(.+)$/m)?.[1] || md.match(/I will [^\n.]{10,80}/i)?.[0];
+  const fromMd = cleanGigTitle(heading);
+  if (fromMd && fromMd.length > 8) return fromMd;
+  const slug = url.split("/").pop() || url;
+  return cleanGigTitle(decodeURIComponent(slug).replace(/-/g, " "));
+}
+
 async function auditOne(opts: {
   niche?: string; issue?: string;
   profile?: ScrapeResult | null;
   gig?: ScrapeResult | null;
+  accountGigTitles?: string[];
   geminiKey: string;
   timeoutMs?: number;
 }) {
@@ -775,7 +793,29 @@ async function auditOne(opts: {
 
   const system = `You are a Fiverr ranking expert who has reverse-engineered what makes top-1% sellers convert. Output ONLY valid JSON, no markdown fences, no commentary.`;
 
-  const scrapedBlock = `=== LIVE SCRAPED FIVERR CONTENT VIA ${item?.source?.toUpperCase() || "SCRAPER"} (${url}) ===\n${markdown}\n`;
+  const gigTitles = (opts.accountGigTitles || []).filter(Boolean);
+  const accountServicesBlock = gigTitles.length
+    ? `\n=== ALL LIVE GIGS CURRENTLY SET UP ON THIS SAME FIVERR ACCOUNT (${gigTitles.length}) ===\n${gigTitles.map((t, i) => `${i + 1}. ${t}`).join("\n")}\n`
+    : "";
+
+  const oneProfileRule = target === "PROFILE"
+    ? `\n=== ONE PROFILE, MANY GIGS RULE (CRITICAL) ===
+A Fiverr account has ONE profile title/bio/description for the WHOLE account, but can hold 3-4 related gigs. ${gigTitles.length > 1
+        ? `This account currently sells ${gigTitles.length} gigs (listed above).`
+        : gigTitles.length === 1
+          ? `This account currently sells 1 gig (listed above).`
+          : `The live gig list could not be read — say so instead of inventing services.`}
+- rewrites.profile_title and rewrites.profile_description MUST be an UMBRELLA for the exact services in the gig list above: use the real service words from those gig titles, cover ALL of them in one coherent positioning, and never describe a service the account does not actually sell.
+- If the gigs are related, name the shared specialty first (e.g. the common niche), then mention the specific offers as what the seller delivers.
+- NEVER write the profile as if it only sells one of the gigs, and never contradict a gig title — a mismatch makes the seller look like they do not understand their own service.
+- Flag it as a critical_issue if the current profile bio ignores, contradicts, or only half-covers the live gigs above.
+- If the gig titles cover unrelated niches, say so plainly and recommend which gigs to keep/drop so the profile can stay focused.\n`
+    : accountServicesBlock
+      ? `\n=== ACCOUNT CONTEXT ===\nThis gig sits on an account that also runs the other gigs listed above. Keep the rewrite distinct from them (no cannibalising the same keyword) while staying inside the same specialty.\n`
+      : "";
+
+  const scrapedBlock = `=== LIVE SCRAPED FIVERR CONTENT VIA ${item?.source?.toUpperCase() || "SCRAPER"} (${url}) ===\n${markdown}\n${accountServicesBlock}${oneProfileRule}`;
+
 
   const prompt = `Audit this Fiverr ${target}. Return STRICT JSON ONLY (no fences) in this EXACT shape:
 ${AUDIT_SHAPE}
