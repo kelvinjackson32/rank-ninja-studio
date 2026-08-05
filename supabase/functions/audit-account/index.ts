@@ -798,6 +798,7 @@ Rules:
 - top_issues_summary = 3-6 short bullets naming the biggest issues affecting this account (used as visible warning chips).
 - account_edits = concrete list of "go here → change this" edits inside Fiverr, ordered by priority.
 - ranking_tips = Fiverr-specific SEO/ranking moves (impressions, CTR, response rate, delivery, buyer requests, promoted gigs, video, niche-down).
+- RANKING KEYWORDS ARE MANDATORY: identify the exact buyer-intent search terms real Fiverr buyers type for this service (primary keyword + 2-3 long-tail variants). Front-load the primary keyword in rewrites.gig_title, reuse it naturally in the first 2 lines of rewrites.gig_description, and build rewrites.search_tags/tags from those real search terms (single-service, no broad unrelated words, 5 tags max, lowercase). Name the primary keyword and the long-tails explicitly inside the relevant "reason" fields and in at least 2 ranking_tips so the user knows which terms they are now ranking for.
 - 3 image_prompts, each PREMIUM 1280x769, high-CTR, buyer-magnet quality — assume the current thumbnail is weak unless clearly stated otherwise.
 - 5 search tags max, each <20 chars, lowercase.
 - 5–8 critical_issues, mix of severities, each with concrete fix.
