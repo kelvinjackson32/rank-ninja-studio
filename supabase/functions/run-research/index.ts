@@ -384,10 +384,33 @@ Deno.serve(async (req) => {
   }
 });
 
+async function saveCheckpoint(admin: any, projectId: string, checkpoint: any) {
+  try {
+    await admin
+      .from("projects")
+      .update({ checkpoint, updated_at: new Date().toISOString() })
+      .eq("id", projectId);
+  } catch (e) {
+    console.warn("checkpoint save failed", e);
+  }
+}
+
 async function runResearchWork(admin: any, userId: string, projectId: string, project: any) {
 
     // Require the user's Gemini key up front — fail fast with a clear message before scraping.
     const geminiKey = await getUserGeminiKey(admin, userId);
+
+    // Resume support: reuse whatever the last (failed) run already completed.
+    const cp = (project.checkpoint && typeof project.checkpoint === "object" && !Array.isArray(project.checkpoint))
+      ? { ...project.checkpoint } as any
+      : {} as any;
+    let compacted: any[] = Array.isArray(cp.compacted) ? cp.compacted : [];
+    let scrapedCount = Number(cp.scraped_count) || compacted.length;
+    const allItems: any[] = [];
+
+    if (compacted.length > 0) {
+      await appendLog(admin, projectId, `♻️ Resuming — reusing ${scrapedCount} gigs already scraped (skipping scrape).`);
+    } else {
 
     // Get user's keys ordered by status (active first), then last_used_at
     const { data: keys } = await admin
@@ -403,7 +426,7 @@ async function runResearchWork(admin: any, userId: string, projectId: string, pr
       project.niche,
       ...(project.secondary_keywords || []),
     ].filter(Boolean).slice(0, 1 + MAX_SECONDARY_KEYWORDS);
-    const allItems: any[] = [];
+
 
     for (const q of queries) {
       await appendLog(admin, projectId, `🌐 Scraping Fiverr for: "${q}"`);
