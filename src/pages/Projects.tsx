@@ -145,7 +145,9 @@ const Projects = () => {
           {filtered.length === 0 && <div className="p-12 text-center text-muted-foreground">{projects.length === 0 ? "No projects yet" : "No matches"}</div>}
           {filtered.map((p) => (
             <div key={p.id} className="flex items-center gap-3 p-4 hover:bg-muted/30 transition-colors">
+              <Checkbox checked={selected.includes(p.id)} onCheckedChange={() => toggleOne(p.id)} aria-label={`Select ${p.niche}`} />
               <Link to={`/app/projects/${p.id}`} className="flex items-center gap-4 flex-1 min-w-0">
+
                 {statusIcon(p.status)}
                 <div className="flex-1 min-w-0">
                   <div className="font-medium truncate">{p.niche}</div>
