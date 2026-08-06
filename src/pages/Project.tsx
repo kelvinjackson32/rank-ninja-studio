@@ -69,10 +69,30 @@ const Project = () => {
 
   useEffect(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, [project?.progress_log]);
 
+  // Notify when a long research run finishes (or fails) — even if the tab is in the background.
+  useEffect(() => {
+    const status = project?.status;
+    if (!status) return;
+    const prev = prevStatus.current;
+    prevStatus.current = status;
+    if (!prev || prev === status) return;
+    if (!RUNNING_STATUSES.includes(prev)) return;
+    if (status === "complete") {
+      toast.success(`Research complete: ${project.niche}`);
+      notifyJobDone("Research complete ✅", `${project.niche} — your gig blueprint is ready.`, `project-${id}`);
+    } else if (status === "error") {
+      toast.error(`Research failed: ${project.niche}`);
+      notifyJobDone("Research failed ❌", `${project.niche} — open the project to resume from the last stage.`, `project-${id}`);
+    }
+  }, [project?.status, project?.niche, id]);
+
   const copy = (text: string) => { navigator.clipboard.writeText(text); toast.success("Copied"); };
 
-  const launchResearch = async (projectId: string, failureLog?: any[]) => {
-    const { error } = await supabase.functions.invoke("run-research", { body: { projectId } });
+  const launchResearch = async (projectId: string, failureLog?: any[], opts?: { resume?: boolean }) => {
+    void askNotificationPermission();
+    const { error } = await supabase.functions.invoke("run-research", {
+      body: { projectId, resume: !!opts?.resume, fresh: !opts?.resume },
+    });
     if (error) {
       await supabase.from("projects").update({
         status: "error",
@@ -82,14 +102,19 @@ const Project = () => {
     }
   };
 
-  const rerun = async () => {
-    setRerunning(true);
+  const rerun = async (resume = false) => {
+    if (resume) setResuming(true); else setRerunning(true);
     try {
-      await launchResearch(id!, project ? [...(project.progress_log || []), { ts: new Date().toISOString(), msg: "❌ Research failed to restart. Please try again." }] : undefined);
-      toast.success("Research re-launched");
+      await launchResearch(
+        id!,
+        project ? [...(project.progress_log || []), { ts: new Date().toISOString(), msg: "❌ Research failed to restart. Please try again." }] : undefined,
+        { resume },
+      );
+      toast.success(resume ? "Resuming from last completed stage" : "Research re-launched");
       load();
-    } catch (e: any) { toast.error(e.message); } finally { setRerunning(false); }
+    } catch (e: any) { toast.error(e.message); } finally { setResuming(false); setRerunning(false); }
   };
+
 
   const buildFromAngle = async (angleTitle: string, primaryKeyword?: string) => {
     if (!user || !angleTitle) return;
