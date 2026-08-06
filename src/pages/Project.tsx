@@ -186,12 +186,19 @@ const Project = () => {
                 <Button size="sm" variant="outline" onClick={exportMd}><Download className="w-4 h-4 mr-1" />Export .md</Button>
               </>
             )}
-            {canRerun && (
-              <Button size="sm" variant="outline" onClick={rerun} disabled={rerunning}>
-                {rerunning ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <RotateCw className="w-4 h-4 mr-1" />}
-                Re-run
+            {canResume && (
+              <Button size="sm" onClick={() => rerun(true)} disabled={resuming || rerunning} className="bg-gradient-to-r from-primary to-secondary text-primary-foreground">
+                {resuming ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <PlayCircle className="w-4 h-4 mr-1" />}
+                Resume{resumeStage ? ` (from ${resumeStage})` : ""}
               </Button>
             )}
+            {canRerun && (
+              <Button size="sm" variant="outline" onClick={() => rerun(false)} disabled={rerunning || resuming}>
+                {rerunning ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <RotateCw className="w-4 h-4 mr-1" />}
+                Re-run fresh
+              </Button>
+            )}
+
           </div>
         </div>
 
