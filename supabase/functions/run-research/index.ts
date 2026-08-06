@@ -559,12 +559,18 @@ async function runResearchWork(admin: any, userId: string, projectId: string, pr
     const dataBlob = JSON.stringify(compacted).slice(0, 26000);
 
 
-    await appendLog(admin, projectId, `🤖 AI analyzing winning patterns across the strongest first-page data...`);
+    let insights: any = (cp.insights && typeof cp.insights === "object") ? cp.insights : null;
 
     // Variation seed so each Re-run produces fresh niche angles + edited titles/sellers/etc.
-    const variationSeed = Math.floor(Math.random() * 1_000_000);
+    const variationSeed = Number(cp.variation_seed) || Math.floor(Math.random() * 1_000_000);
+    cp.variation_seed = variationSeed;
 
-    const insights = await generateJson(
+    if (insights) {
+      await appendLog(admin, projectId, `♻️ Resuming — market insights already generated (skipping analysis).`);
+    } else {
+    await appendLog(admin, projectId, `🤖 AI analyzing winning patterns across the strongest first-page data...`);
+    insights = await generateJson(
+
       `Analyze these REAL Fiverr gigs scraped for niche "${project.niche}":\n${dataBlob}\n\nVariation seed (use to ensure this run produces DIFFERENT niche_angles than any previous run): ${variationSeed}\n\nReturn JSON with these EXACT keys (no extras):
 {
   "competition_level": "low|medium|high|saturated",
