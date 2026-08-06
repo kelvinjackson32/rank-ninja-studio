@@ -39,8 +39,11 @@ const Project = () => {
   const [project, setProject] = useState<any>(null);
   const [result, setResult] = useState<any>(null);
   const [rerunning, setRerunning] = useState(false);
+  const [resuming, setResuming] = useState(false);
   const [building, setBuilding] = useState<string | null>(null);
   const logRef = useRef<HTMLDivElement>(null);
+  const prevStatus = useRef<string | null>(null);
+
 
   const load = async () => {
     const { data: p } = await supabase.from("projects").select("*").eq("id", id).single();
