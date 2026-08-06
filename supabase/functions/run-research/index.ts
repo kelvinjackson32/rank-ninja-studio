@@ -332,7 +332,9 @@ Deno.serve(async (req) => {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
 
-    const { projectId } = await req.json();
+    const body = await req.json().catch(() => ({}));
+    const projectId = body?.projectId;
+    const fresh = body?.fresh !== false && body?.resume !== true; // default: fresh run
     if (!projectId) throw new Error("projectId required");
 
     const { data: project } = await admin
@@ -343,15 +345,26 @@ Deno.serve(async (req) => {
       .single();
     if (!project) throw new Error("Project not found");
 
+    if (fresh) project.checkpoint = {};
+    const hasCheckpoint = !fresh && project.checkpoint && Object.keys(project.checkpoint).length > 0;
+
     await admin
       .from("projects")
-      .update({ status: "scraping", progress_log: [], updated_at: new Date().toISOString() })
+      .update({
+        status: "scraping",
+        progress_log: [],
+        ...(fresh ? { checkpoint: {} } : {}),
+        updated_at: new Date().toISOString(),
+      })
       .eq("id", projectId);
     await appendLog(
       admin,
       projectId,
-      `🔍 Starting research for "${project.niche}" (running in background)`,
+      hasCheckpoint
+        ? `▶️ Resuming research for "${project.niche}" from the last completed stage`
+        : `🔍 Starting research for "${project.niche}" (running in background)`,
     );
+
 
     // Run heavy work in background to avoid 150s edge timeout.
     // Frontend tracks progress via realtime updates on `projects`.
