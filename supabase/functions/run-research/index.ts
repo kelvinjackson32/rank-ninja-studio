@@ -777,7 +777,7 @@ REQUIREMENTS:
     await admin.from("research_results").insert({
       project_id: projectId,
       user_id: userId,
-      scraped_data: { count: allItems.length, sample: compacted },
+      scraped_data: { count: scrapedCount, sample: compacted },
       insights,
       profile_optimization: safeProfile,
       gig_optimization: safeGig,
@@ -786,8 +786,9 @@ REQUIREMENTS:
 
     await admin
       .from("projects")
-      .update({ status: "complete", updated_at: new Date().toISOString() })
+      .update({ status: "complete", checkpoint: {}, updated_at: new Date().toISOString() })
       .eq("id", projectId);
+
     await appendLog(
       admin,
       projectId,
