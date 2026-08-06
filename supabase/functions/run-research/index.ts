@@ -737,8 +737,14 @@ REQUIREMENTS:
       geminiKey,
       "profile and gig package",
     );
+    // ✅ Checkpoint 3 — offer generated.
+    cp.offer = offer;
+    await saveCheckpoint(admin, projectId, cp);
+    } // end offer stage
+
     const profile_optimization = offer.profile_optimization || {};
     const gig_optimization = offer.gig_optimization || {};
+
     if (typeof profile_optimization.short_bio === "string" && profile_optimization.short_bio.length > 150) {
       profile_optimization.short_bio = profile_optimization.short_bio.slice(0, 147).trimEnd() + "...";
     }
