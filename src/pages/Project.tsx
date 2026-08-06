@@ -149,7 +149,7 @@ const Project = () => {
     if (!Number.isFinite(lastActivity) || Date.now() - lastActivity < STUCK_AFTER_MS) return;
     const log = [...(project.progress_log || []), {
       ts: new Date().toISOString(),
-      msg: "❌ Research timed out before finishing. Use Re-run to start a fresh faster scan.",
+      msg: "❌ Research timed out before finishing. Use Resume to continue from the last completed stage, or Re-run fresh.",
     }];
     supabase.from("projects").update({ status: "error", progress_log: log }).eq("id", id).then(() => load());
   }, [project, id]);
@@ -158,6 +158,10 @@ const Project = () => {
 
   const isRunning = RUNNING_STATUSES.includes(project.status);
   const canRerun = project.status === "complete" || project.status === "error";
+  const cp = (project.checkpoint && typeof project.checkpoint === "object") ? project.checkpoint : {};
+  const resumeStage = cp.offer ? "final save" : cp.insights ? "profile & gig" : cp.compacted ? "AI analysis" : null;
+  const canResume = project.status === "error" && !!resumeStage;
+
 
   return (
     <AppShell>
