@@ -486,15 +486,7 @@ async function runResearchWork(admin: any, userId: string, projectId: string, pr
         );
     }
 
-    await appendLog(
-      admin,
-      projectId,
-      `📊 Analyzed ${allItems.length} gigs total. Generating intelligence...`,
-    );
-    await admin
-      .from("projects")
-      .update({ status: "analyzing", updated_at: new Date().toISOString() })
-      .eq("id", projectId);
+    scrapedCount = allItems.length;
 
     // Compact scraped data for AI — include order/queue signals + source URLs
     const normalizeUrl = (u: any): string | null => {
@@ -503,7 +495,7 @@ async function runResearchWork(admin: any, userId: string, projectId: string, pr
       if (u.startsWith("/")) return `https://www.fiverr.com${u}`;
       return null;
     };
-    const compacted = allItems.slice(0, 60).map((g: any) => {
+    compacted = allItems.slice(0, 60).map((g: any) => {
       const sellerName = g.seller?.name || g.sellerName || (typeof g.seller === "string" ? g.seller : null) || g.username;
       const gigUrl = normalizeUrl(g.url || g.gigUrl || g.link || g.gigLink || g.permalink);
       const sellerUrl = normalizeUrl(g.seller?.url || g.seller?.profileUrl || g.sellerUrl || g.sellerProfileUrl)
@@ -527,7 +519,22 @@ async function runResearchWork(admin: any, userId: string, projectId: string, pr
       };
     });
 
+    // ✅ Checkpoint 1 — scraping done. A later failure will resume from here.
+    await saveCheckpoint(admin, projectId, { ...cp, compacted, scraped_count: scrapedCount });
+    } // end scrape stage
+
+    await appendLog(
+      admin,
+      projectId,
+      `📊 Analyzed ${scrapedCount} gigs total. Generating intelligence...`,
+    );
+    await admin
+      .from("projects")
+      .update({ status: "analyzing", updated_at: new Date().toISOString() })
+      .eq("id", projectId);
+
     const dataBlob = JSON.stringify(compacted).slice(0, 26000);
+
 
     await appendLog(admin, projectId, `🤖 AI analyzing winning patterns across the strongest first-page data...`);
 
