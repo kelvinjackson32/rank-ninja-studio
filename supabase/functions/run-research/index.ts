@@ -650,7 +650,12 @@ For "niche_angles": return EXACTLY 3 distinct angles. Each must be a REFINEMENT/
     const providedTitleRule = providedTitle
       ? `\n\nLOCKED GIG TITLE MODE: The user already has this exact gig title and it MUST NOT be changed:\n"${providedTitle}"\n- Set gig_optimization.gig_title to EXACTLY that string, character for character.\n- Every other field (category, search_tags, description, buyer_requirements, faqs, packages, thumbnail_prompts, video_concepts, profile copy) must be built to match and sell THAT exact title.\n- title_variations must still return 6 alternative angles the user could switch to later, but gig_title stays locked.`
       : "";
-    const offer = await generateJson(
+    let offer: any = (cp.offer && typeof cp.offer === "object") ? cp.offer : null;
+    if (offer) {
+      await appendLog(admin, projectId, `♻️ Resuming — profile & gig package already generated (skipping).`);
+    } else {
+    offer = await generateJson(
+
       `Based on this Fiverr competitor research for "${project.niche}":
 Insights: ${JSON.stringify(insights)}
 Top gigs sample: ${dataBlob.slice(0, 9000)}
