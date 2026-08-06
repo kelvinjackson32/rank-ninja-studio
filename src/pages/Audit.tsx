@@ -14,6 +14,8 @@ import {
   Image as ImageIcon, ChevronDown, Link2, User, ClipboardList,
 } from "lucide-react";
 import { SourceEvidencePanel, type EvidenceItem } from "@/components/SourceEvidencePanel";
+import { askNotificationPermission, notifyJobDone } from "@/lib/notify";
+
 
 type Issue = { area: string; severity: string; problem: string; why_it_hurts: string; fix: string };
 type AccountEdit = { where_to_edit: string; what_to_change: string; priority: string };
