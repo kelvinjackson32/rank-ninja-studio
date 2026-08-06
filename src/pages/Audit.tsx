@@ -404,7 +404,9 @@ const Audit = () => {
       toast({ title: "Paste a Fiverr link first", description: "Your profile link, a gig link, or your username — one per line.", variant: "destructive" });
       return;
     }
+    void askNotificationPermission();
     setLoading(true); setProfileAudit(null); setRanked([]); setFailedGigs([]); setBlockedNote(null); setCurrentId(null);
+
     try {
       const reportedIssue = [issue.trim(), performanceSummary].filter(Boolean).join("\n").slice(0, 2000);
       const { data, error } = await supabase.functions.invoke("audit-account", {
