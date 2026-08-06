@@ -637,7 +637,13 @@ For "niche_angles": return EXACTLY 3 distinct angles. Each must be a REFINEMENT/
       });
     }
 
+    // ✅ Checkpoint 2 — insights done.
+    cp.insights = insights;
+    await saveCheckpoint(admin, projectId, cp);
+    } // end insights stage
+
     await appendLog(admin, projectId, `✏️ Generating profile, gig package, requirements, and thumbnails...`);
+
     const targetDuration = Number(project.target_duration_seconds) || 30;
     const characterLock = project.character_lock !== false;
     const providedTitle = String(project.provided_gig_title || "").trim().slice(0, 80);
