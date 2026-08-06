@@ -18,6 +18,8 @@ import { ThumbnailGenerator } from "@/components/ThumbnailGenerator";
 import { GapAnalysisPanel } from "@/components/GapAnalysisPanel";
 import { OriginalityPanel } from "@/components/OriginalityPanel";
 import { validateSearchTags, type FiverrFieldKey } from "@/lib/fiverrLimits";
+import { askNotificationPermission, notifyJobDone } from "@/lib/notify";
+
 
 // Map internal field keys → Fiverr validator keys (only fields with a known Fiverr limit)
 const FIVERR_FIELD_MAP: Record<string, FiverrFieldKey> = {
