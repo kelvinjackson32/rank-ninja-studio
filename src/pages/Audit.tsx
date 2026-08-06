@@ -374,8 +374,15 @@ const Audit = () => {
         .single();
       if (error) throw new Error(error.message);
       const audit = data as SavedAudit;
-      if (audit.status === "error") throw new Error(audit.error_message || "The audit could not be completed.");
-      if (audit.status === "complete") return audit;
+      if (audit.status === "error") {
+        notifyJobDone("Audit failed ❌", audit.error_message || "The audit could not be completed.", `audit-${id}`);
+        throw new Error(audit.error_message || "The audit could not be completed.");
+      }
+      if (audit.status === "complete") {
+        notifyJobDone("Account audit ready ✅", `${audit.label || "Your Fiverr audit"} — open it to see the fix plan.`, `audit-${id}`);
+        return audit;
+      }
+
     }
     throw new Error("Still processing — open it from Saved audits in a moment to see the results.");
   };
