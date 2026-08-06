@@ -332,7 +332,9 @@ Deno.serve(async (req) => {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
 
-    const { projectId } = await req.json();
+    const body = await req.json().catch(() => ({}));
+    const projectId = body?.projectId;
+    const fresh = body?.fresh !== false && body?.resume !== true; // default: fresh run
     if (!projectId) throw new Error("projectId required");
 
     const { data: project } = await admin
@@ -343,15 +345,26 @@ Deno.serve(async (req) => {
       .single();
     if (!project) throw new Error("Project not found");
 
+    if (fresh) project.checkpoint = {};
+    const hasCheckpoint = !fresh && project.checkpoint && Object.keys(project.checkpoint).length > 0;
+
     await admin
       .from("projects")
-      .update({ status: "scraping", progress_log: [], updated_at: new Date().toISOString() })
+      .update({
+        status: "scraping",
+        progress_log: [],
+        ...(fresh ? { checkpoint: {} } : {}),
+        updated_at: new Date().toISOString(),
+      })
       .eq("id", projectId);
     await appendLog(
       admin,
       projectId,
-      `🔍 Starting research for "${project.niche}" (running in background)`,
+      hasCheckpoint
+        ? `▶️ Resuming research for "${project.niche}" from the last completed stage`
+        : `🔍 Starting research for "${project.niche}" (running in background)`,
     );
+
 
     // Run heavy work in background to avoid 150s edge timeout.
     // Frontend tracks progress via realtime updates on `projects`.
@@ -384,10 +397,33 @@ Deno.serve(async (req) => {
   }
 });
 
+async function saveCheckpoint(admin: any, projectId: string, checkpoint: any) {
+  try {
+    await admin
+      .from("projects")
+      .update({ checkpoint, updated_at: new Date().toISOString() })
+      .eq("id", projectId);
+  } catch (e) {
+    console.warn("checkpoint save failed", e);
+  }
+}
+
 async function runResearchWork(admin: any, userId: string, projectId: string, project: any) {
 
     // Require the user's Gemini key up front — fail fast with a clear message before scraping.
     const geminiKey = await getUserGeminiKey(admin, userId);
+
+    // Resume support: reuse whatever the last (failed) run already completed.
+    const cp = (project.checkpoint && typeof project.checkpoint === "object" && !Array.isArray(project.checkpoint))
+      ? { ...project.checkpoint } as any
+      : {} as any;
+    let compacted: any[] = Array.isArray(cp.compacted) ? cp.compacted : [];
+    let scrapedCount = Number(cp.scraped_count) || compacted.length;
+    const allItems: any[] = [];
+
+    if (compacted.length > 0) {
+      await appendLog(admin, projectId, `♻️ Resuming — reusing ${scrapedCount} gigs already scraped (skipping scrape).`);
+    } else {
 
     // Get user's keys ordered by status (active first), then last_used_at
     const { data: keys } = await admin
@@ -403,7 +439,7 @@ async function runResearchWork(admin: any, userId: string, projectId: string, pr
       project.niche,
       ...(project.secondary_keywords || []),
     ].filter(Boolean).slice(0, 1 + MAX_SECONDARY_KEYWORDS);
-    const allItems: any[] = [];
+
 
     for (const q of queries) {
       await appendLog(admin, projectId, `🌐 Scraping Fiverr for: "${q}"`);
@@ -486,15 +522,7 @@ async function runResearchWork(admin: any, userId: string, projectId: string, pr
         );
     }
 
-    await appendLog(
-      admin,
-      projectId,
-      `📊 Analyzed ${allItems.length} gigs total. Generating intelligence...`,
-    );
-    await admin
-      .from("projects")
-      .update({ status: "analyzing", updated_at: new Date().toISOString() })
-      .eq("id", projectId);
+    scrapedCount = allItems.length;
 
     // Compact scraped data for AI — include order/queue signals + source URLs
     const normalizeUrl = (u: any): string | null => {
@@ -503,7 +531,7 @@ async function runResearchWork(admin: any, userId: string, projectId: string, pr
       if (u.startsWith("/")) return `https://www.fiverr.com${u}`;
       return null;
     };
-    const compacted = allItems.slice(0, 60).map((g: any) => {
+    compacted = allItems.slice(0, 60).map((g: any) => {
       const sellerName = g.seller?.name || g.sellerName || (typeof g.seller === "string" ? g.seller : null) || g.username;
       const gigUrl = normalizeUrl(g.url || g.gigUrl || g.link || g.gigLink || g.permalink);
       const sellerUrl = normalizeUrl(g.seller?.url || g.seller?.profileUrl || g.sellerUrl || g.sellerProfileUrl)
@@ -527,14 +555,35 @@ async function runResearchWork(admin: any, userId: string, projectId: string, pr
       };
     });
 
+    // ✅ Checkpoint 1 — scraping done. A later failure will resume from here.
+    await saveCheckpoint(admin, projectId, { ...cp, compacted, scraped_count: scrapedCount });
+    } // end scrape stage
+
+    await appendLog(
+      admin,
+      projectId,
+      `📊 Analyzed ${scrapedCount} gigs total. Generating intelligence...`,
+    );
+    await admin
+      .from("projects")
+      .update({ status: "analyzing", updated_at: new Date().toISOString() })
+      .eq("id", projectId);
+
     const dataBlob = JSON.stringify(compacted).slice(0, 26000);
 
-    await appendLog(admin, projectId, `🤖 AI analyzing winning patterns across the strongest first-page data...`);
+
+    let insights: any = (cp.insights && typeof cp.insights === "object") ? cp.insights : null;
 
     // Variation seed so each Re-run produces fresh niche angles + edited titles/sellers/etc.
-    const variationSeed = Math.floor(Math.random() * 1_000_000);
+    const variationSeed = Number(cp.variation_seed) || Math.floor(Math.random() * 1_000_000);
+    cp.variation_seed = variationSeed;
 
-    const insights = await generateJson(
+    if (insights) {
+      await appendLog(admin, projectId, `♻️ Resuming — market insights already generated (skipping analysis).`);
+    } else {
+    await appendLog(admin, projectId, `🤖 AI analyzing winning patterns across the strongest first-page data...`);
+    insights = await generateJson(
+
       `Analyze these REAL Fiverr gigs scraped for niche "${project.niche}":\n${dataBlob}\n\nVariation seed (use to ensure this run produces DIFFERENT niche_angles than any previous run): ${variationSeed}\n\nReturn JSON with these EXACT keys (no extras):
 {
   "competition_level": "low|medium|high|saturated",
@@ -601,14 +650,25 @@ For "niche_angles": return EXACTLY 3 distinct angles. Each must be a REFINEMENT/
       });
     }
 
+    // ✅ Checkpoint 2 — insights done.
+    cp.insights = insights;
+    await saveCheckpoint(admin, projectId, cp);
+    } // end insights stage
+
     await appendLog(admin, projectId, `✏️ Generating profile, gig package, requirements, and thumbnails...`);
+
     const targetDuration = Number(project.target_duration_seconds) || 30;
     const characterLock = project.character_lock !== false;
     const providedTitle = String(project.provided_gig_title || "").trim().slice(0, 80);
     const providedTitleRule = providedTitle
       ? `\n\nLOCKED GIG TITLE MODE: The user already has this exact gig title and it MUST NOT be changed:\n"${providedTitle}"\n- Set gig_optimization.gig_title to EXACTLY that string, character for character.\n- Every other field (category, search_tags, description, buyer_requirements, faqs, packages, thumbnail_prompts, video_concepts, profile copy) must be built to match and sell THAT exact title.\n- title_variations must still return 6 alternative angles the user could switch to later, but gig_title stays locked.`
       : "";
-    const offer = await generateJson(
+    let offer: any = (cp.offer && typeof cp.offer === "object") ? cp.offer : null;
+    if (offer) {
+      await appendLog(admin, projectId, `♻️ Resuming — profile & gig package already generated (skipping).`);
+    } else {
+    offer = await generateJson(
+
       `Based on this Fiverr competitor research for "${project.niche}":
 Insights: ${JSON.stringify(insights)}
 Top gigs sample: ${dataBlob.slice(0, 9000)}
@@ -690,8 +750,14 @@ REQUIREMENTS:
       geminiKey,
       "profile and gig package",
     );
+    // ✅ Checkpoint 3 — offer generated.
+    cp.offer = offer;
+    await saveCheckpoint(admin, projectId, cp);
+    } // end offer stage
+
     const profile_optimization = offer.profile_optimization || {};
     const gig_optimization = offer.gig_optimization || {};
+
     if (typeof profile_optimization.short_bio === "string" && profile_optimization.short_bio.length > 150) {
       profile_optimization.short_bio = profile_optimization.short_bio.slice(0, 147).trimEnd() + "...";
     }
@@ -724,7 +790,7 @@ REQUIREMENTS:
     await admin.from("research_results").insert({
       project_id: projectId,
       user_id: userId,
-      scraped_data: { count: allItems.length, sample: compacted },
+      scraped_data: { count: scrapedCount, sample: compacted },
       insights,
       profile_optimization: safeProfile,
       gig_optimization: safeGig,
@@ -733,8 +799,9 @@ REQUIREMENTS:
 
     await admin
       .from("projects")
-      .update({ status: "complete", updated_at: new Date().toISOString() })
+      .update({ status: "complete", checkpoint: {}, updated_at: new Date().toISOString() })
       .eq("id", projectId);
+
     await appendLog(
       admin,
       projectId,

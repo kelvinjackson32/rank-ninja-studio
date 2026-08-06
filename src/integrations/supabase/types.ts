@@ -137,6 +137,7 @@ export type Database = {
         Row: {
           bulk_group_id: string | null
           character_lock: boolean
+          checkpoint: Json
           created_at: string
           id: string
           niche: string
@@ -151,6 +152,7 @@ export type Database = {
         Insert: {
           bulk_group_id?: string | null
           character_lock?: boolean
+          checkpoint?: Json
           created_at?: string
           id?: string
           niche: string
@@ -165,6 +167,7 @@ export type Database = {
         Update: {
           bulk_group_id?: string | null
           character_lock?: boolean
+          checkpoint?: Json
           created_at?: string
           id?: string
           niche?: string

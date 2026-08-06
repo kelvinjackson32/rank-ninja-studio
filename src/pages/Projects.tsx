@@ -10,6 +10,8 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
+
 import { toast } from "sonner";
 
 const statusIcon = (s: string) => {
@@ -19,17 +21,38 @@ const statusIcon = (s: string) => {
   return <Loader2 className="w-4 h-4 text-primary animate-spin" />;
 };
 
+const STATUS_FILTERS = [
+  { key: "all", label: "All" },
+  { key: "complete", label: "Complete" },
+  { key: "running", label: "Running" },
+  { key: "error", label: "Failed" },
+] as const;
+
+const RUNNING = ["pending", "scraping", "analyzing"];
+
 const Projects = () => {
   const [projects, setProjects] = useState<any[]>([]);
   const [q, setQ] = useState("");
+  const [status, setStatus] = useState<string>("all");
+  const [selected, setSelected] = useState<string[]>([]);
 
-  const load = () => supabase.from("projects").select("*").order("created_at", { ascending: false }).then(({ data }) => setProjects(data || []));
+  const load = () => supabase.from("projects").select("*").order("created_at", { ascending: false }).then(({ data }) => {
+    setProjects(data || []);
+    setSelected([]);
+  });
   useEffect(() => { load(); }, []);
 
   const del = async (id: string) => {
     const { error } = await supabase.from("projects").delete().eq("id", id);
     if (error) { toast.error(error.message); return; }
     toast.success("Project deleted");
+    load();
+  };
+
+  const delMany = async () => {
+    const { error } = await supabase.from("projects").delete().in("id", selected);
+    if (error) { toast.error(error.message); return; }
+    toast.success(`${selected.length} project${selected.length > 1 ? "s" : ""} deleted`);
     load();
   };
 
@@ -40,7 +63,24 @@ const Projects = () => {
     load();
   };
 
-  const filtered = projects.filter(p => p.niche.toLowerCase().includes(q.toLowerCase()));
+  const counts = {
+    all: projects.length,
+    complete: projects.filter((p) => p.status === "complete").length,
+    running: projects.filter((p) => RUNNING.includes(p.status)).length,
+    error: projects.filter((p) => p.status === "error").length,
+  } as Record<string, number>;
+
+  const filtered = projects.filter((p) => {
+    const matchesQ = p.niche.toLowerCase().includes(q.toLowerCase());
+    const matchesStatus =
+      status === "all" ? true : status === "running" ? RUNNING.includes(p.status) : p.status === status;
+    return matchesQ && matchesStatus;
+  });
+
+  const allShownSelected = filtered.length > 0 && filtered.every((p) => selected.includes(p.id));
+  const toggleAll = () => setSelected(allShownSelected ? [] : filtered.map((p) => p.id));
+  const toggleOne = (id: string) =>
+    setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
 
   return (
     <AppShell>
@@ -53,16 +93,61 @@ const Projects = () => {
           <Button asChild className="bg-gradient-to-r from-primary to-secondary text-primary-foreground"><Link to="/app/new"><Plus className="w-4 h-4 mr-1" />New</Link></Button>
         </div>
 
-        <div className="relative mb-4">
+        <div className="relative mb-3">
           <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search projects..." className="pl-9 bg-input/50" />
         </div>
+
+        <div className="flex flex-wrap items-center gap-2 mb-4">
+          {STATUS_FILTERS.map((f) => (
+            <button
+              key={f.key}
+              onClick={() => setStatus(f.key)}
+              className={`px-3 py-1.5 rounded-full text-xs font-mono border transition-colors ${
+                status === f.key
+                  ? "bg-primary/15 text-primary border-primary/30"
+                  : "border-border text-muted-foreground hover:text-foreground hover:bg-muted/40"
+              }`}
+            >
+              {f.label} <span className="opacity-60">{counts[f.key]}</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="flex items-center justify-between gap-3 mb-3 min-h-9">
+          <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer select-none">
+            <Checkbox checked={allShownSelected} onCheckedChange={toggleAll} aria-label="Select all" />
+            {selected.length > 0 ? `${selected.length} selected` : "Select all"}
+          </label>
+          {selected.length > 0 && (
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button size="sm" variant="outline" className="border-destructive/40 text-destructive">
+                  <Trash2 className="w-4 h-4 mr-1" />Delete {selected.length}
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent className="surface-card">
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete {selected.length} project{selected.length > 1 ? "s" : ""}?</AlertDialogTitle>
+                  <AlertDialogDescription>This permanently removes them and their research results.</AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={delMany} className="bg-destructive text-destructive-foreground">Delete</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          )}
+        </div>
+
 
         <div className="surface-card rounded-xl divide-y divide-border">
           {filtered.length === 0 && <div className="p-12 text-center text-muted-foreground">{projects.length === 0 ? "No projects yet" : "No matches"}</div>}
           {filtered.map((p) => (
             <div key={p.id} className="flex items-center gap-3 p-4 hover:bg-muted/30 transition-colors">
+              <Checkbox checked={selected.includes(p.id)} onCheckedChange={() => toggleOne(p.id)} aria-label={`Select ${p.niche}`} />
               <Link to={`/app/projects/${p.id}`} className="flex items-center gap-4 flex-1 min-w-0">
+
                 {statusIcon(p.status)}
                 <div className="flex-1 min-w-0">
                   <div className="font-medium truncate">{p.niche}</div>

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { ArrowLeft, Copy, Loader2, Sparkles, RefreshCw, Tag, MessageSquare, Package, User, Download, Trophy, Lightbulb, Star, RotateCw, Image as ImageIcon, Type, Search, Gauge, ExternalLink, Rocket, Video, Film, FileText, Users, Target, Fingerprint } from "lucide-react";
+import { ArrowLeft, Copy, Loader2, Sparkles, RefreshCw, Tag, MessageSquare, Package, User, Download, Trophy, Lightbulb, Star, RotateCw, PlayCircle, Image as ImageIcon, Type, Search, Gauge, ExternalLink, Rocket, Video, Film, FileText, Users, Target, Fingerprint } from "lucide-react";
 import { jsPDF } from "jspdf";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -18,6 +18,8 @@ import { ThumbnailGenerator } from "@/components/ThumbnailGenerator";
 import { GapAnalysisPanel } from "@/components/GapAnalysisPanel";
 import { OriginalityPanel } from "@/components/OriginalityPanel";
 import { validateSearchTags, type FiverrFieldKey } from "@/lib/fiverrLimits";
+import { askNotificationPermission, notifyJobDone } from "@/lib/notify";
+
 
 // Map internal field keys → Fiverr validator keys (only fields with a known Fiverr limit)
 const FIVERR_FIELD_MAP: Record<string, FiverrFieldKey> = {
@@ -39,8 +41,11 @@ const Project = () => {
   const [project, setProject] = useState<any>(null);
   const [result, setResult] = useState<any>(null);
   const [rerunning, setRerunning] = useState(false);
+  const [resuming, setResuming] = useState(false);
   const [building, setBuilding] = useState<string | null>(null);
   const logRef = useRef<HTMLDivElement>(null);
+  const prevStatus = useRef<string | null>(null);
+
 
   const load = async () => {
     const { data: p } = await supabase.from("projects").select("*").eq("id", id).single();
@@ -66,10 +71,30 @@ const Project = () => {
 
   useEffect(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, [project?.progress_log]);
 
+  // Notify when a long research run finishes (or fails) — even if the tab is in the background.
+  useEffect(() => {
+    const status = project?.status;
+    if (!status) return;
+    const prev = prevStatus.current;
+    prevStatus.current = status;
+    if (!prev || prev === status) return;
+    if (!RUNNING_STATUSES.includes(prev)) return;
+    if (status === "complete") {
+      toast.success(`Research complete: ${project.niche}`);
+      notifyJobDone("Research complete ✅", `${project.niche} — your gig blueprint is ready.`, `project-${id}`);
+    } else if (status === "error") {
+      toast.error(`Research failed: ${project.niche}`);
+      notifyJobDone("Research failed ❌", `${project.niche} — open the project to resume from the last stage.`, `project-${id}`);
+    }
+  }, [project?.status, project?.niche, id]);
+
   const copy = (text: string) => { navigator.clipboard.writeText(text); toast.success("Copied"); };
 
-  const launchResearch = async (projectId: string, failureLog?: any[]) => {
-    const { error } = await supabase.functions.invoke("run-research", { body: { projectId } });
+  const launchResearch = async (projectId: string, failureLog?: any[], opts?: { resume?: boolean }) => {
+    void askNotificationPermission();
+    const { error } = await supabase.functions.invoke("run-research", {
+      body: { projectId, resume: !!opts?.resume, fresh: !opts?.resume },
+    });
     if (error) {
       await supabase.from("projects").update({
         status: "error",
@@ -79,14 +104,19 @@ const Project = () => {
     }
   };
 
-  const rerun = async () => {
-    setRerunning(true);
+  const rerun = async (resume = false) => {
+    if (resume) setResuming(true); else setRerunning(true);
     try {
-      await launchResearch(id!, project ? [...(project.progress_log || []), { ts: new Date().toISOString(), msg: "❌ Research failed to restart. Please try again." }] : undefined);
-      toast.success("Research re-launched");
+      await launchResearch(
+        id!,
+        project ? [...(project.progress_log || []), { ts: new Date().toISOString(), msg: "❌ Research failed to restart. Please try again." }] : undefined,
+        { resume },
+      );
+      toast.success(resume ? "Resuming from last completed stage" : "Research re-launched");
       load();
-    } catch (e: any) { toast.error(e.message); } finally { setRerunning(false); }
+    } catch (e: any) { toast.error(e.message); } finally { setResuming(false); setRerunning(false); }
   };
+
 
   const buildFromAngle = async (angleTitle: string, primaryKeyword?: string) => {
     if (!user || !angleTitle) return;
@@ -121,7 +151,7 @@ const Project = () => {
     if (!Number.isFinite(lastActivity) || Date.now() - lastActivity < STUCK_AFTER_MS) return;
     const log = [...(project.progress_log || []), {
       ts: new Date().toISOString(),
-      msg: "❌ Research timed out before finishing. Use Re-run to start a fresh faster scan.",
+      msg: "❌ Research timed out before finishing. Use Resume to continue from the last completed stage, or Re-run fresh.",
     }];
     supabase.from("projects").update({ status: "error", progress_log: log }).eq("id", id).then(() => load());
   }, [project, id]);
@@ -130,6 +160,10 @@ const Project = () => {
 
   const isRunning = RUNNING_STATUSES.includes(project.status);
   const canRerun = project.status === "complete" || project.status === "error";
+  const cp = (project.checkpoint && typeof project.checkpoint === "object") ? project.checkpoint : {};
+  const resumeStage = cp.offer ? "final save" : cp.insights ? "profile & gig" : cp.compacted ? "AI analysis" : null;
+  const canResume = project.status === "error" && !!resumeStage;
+
 
   return (
     <AppShell>
@@ -158,12 +192,19 @@ const Project = () => {
                 <Button size="sm" variant="outline" onClick={exportMd}><Download className="w-4 h-4 mr-1" />Export .md</Button>
               </>
             )}
-            {canRerun && (
-              <Button size="sm" variant="outline" onClick={rerun} disabled={rerunning}>
-                {rerunning ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <RotateCw className="w-4 h-4 mr-1" />}
-                Re-run
+            {canResume && (
+              <Button size="sm" onClick={() => rerun(true)} disabled={resuming || rerunning} className="bg-gradient-to-r from-primary to-secondary text-primary-foreground">
+                {resuming ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <PlayCircle className="w-4 h-4 mr-1" />}
+                Resume{resumeStage ? ` (from ${resumeStage})` : ""}
               </Button>
             )}
+            {canRerun && (
+              <Button size="sm" variant="outline" onClick={() => rerun(false)} disabled={rerunning || resuming}>
+                {rerunning ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <RotateCw className="w-4 h-4 mr-1" />}
+                Re-run fresh
+              </Button>
+            )}
+
           </div>
         </div>
 
