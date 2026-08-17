@@ -626,7 +626,9 @@ async function callAIOnce(prompt: string, system: string, geminiKey: string, mod
         contents: [{ role: "user", parts: [{ text: prompt }] }],
         generationConfig: {
           temperature: 0.55,
-          maxOutputTokens: 6144,
+          // The audit contains several rewrites and evidence entries. A small output
+          // budget can cut the JSON off before its closing brace.
+          maxOutputTokens: 8192,
           responseMimeType: "application/json",
           thinkingConfig: { thinkingBudget: 0 },
         },
@@ -846,7 +848,30 @@ Rules:
 - source_evidence is MANDATORY: one entry for EVERY Fiverr field you checked (title, tags, description, profile bio, packages/pricing, requirements, gallery/images, reviews, response time, level). "quote" must be text you literally read above — never paraphrase, never invent. If a field was not readable, set quote to "" and status to "needs_manual_confirmation".`;
 
   const raw = await callAI(prompt, system, opts.geminiKey, opts.timeoutMs || 45_000);
-  const parsed = safeParseJSON(raw);
+  let parsed = safeParseJSON(raw);
+  // Gemini occasionally returns a truncated response when the full report is too
+  // verbose. Retry once with a smaller, still actionable report rather than saving
+  // a misleading score of zero.
+  if (!parsed) {
+    console.warn("audit AI returned malformed JSON; retrying with compact output");
+    const compactPrompt = `Create a concise, complete Fiverr ${target} audit as ONE valid JSON object. Do not use markdown or code fences.
+
+Use this shape, with every field present:
+${AUDIT_SHAPE}
+
+LIVE FIVERR CONTENT (${url}):
+${markdown || "No readable content was returned."}
+
+User niche: ${opts.niche || "infer from the live content"}
+User-reported problem: ${opts.issue || "low impressions, low clicks, no orders"}
+
+Keep this compact so the JSON is complete: 3 critical issues, 3 action-plan steps, 3 search tags, 3 buyer requirements, one concise paragraph for each rewrite, 1 thumbnail prompt, and one source-evidence entry per field. Only claim facts you can quote from the live content.`;
+    try {
+      parsed = safeParseJSON(await callAI(compactPrompt, system, opts.geminiKey, opts.timeoutMs || 45_000));
+    } catch (error) {
+      console.error("compact audit retry failed", (error as Error).message);
+    }
+  }
   if (!parsed) {
     return {
       overall_score: 0,
