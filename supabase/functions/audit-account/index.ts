@@ -82,7 +82,7 @@ function getFiverrUsername(raw?: string): string | null {
   try {
     const url = new URL(raw.startsWith("http") ? raw : `https://www.fiverr.com/${raw}`);
     const [username] = url.pathname.split("/").filter(Boolean);
-    if (!username || ["categories", "search", "gigs", "users", "support", "inbox"].includes(username.toLowerCase())) return null;
+    if (!username || ["categories", "search", "gigs", "users", "support", "inbox", "s"].includes(username.toLowerCase())) return null;
     return username;
   } catch {
     return null;
@@ -670,7 +670,14 @@ async function callAI(prompt: string, system: string, geminiKey: string, timeout
       } catch (e: any) {
         lastErr = e;
         const msg = String(e?.message || "");
-        if (!msg.startsWith("__TRANSIENT__")) throw e;
+        const modelUnavailable = /Gemini 404|model .*not found|not supported|does not exist/i.test(msg);
+        if (!msg.startsWith("__TRANSIENT__") && !modelUnavailable) throw e;
+        // Model catalogs change over time. A retired model must not abort the
+        // complete account audit; move to the next known Gemini model.
+        if (modelUnavailable) {
+          console.warn(`audit AI model unavailable: ${model}; trying the next model`);
+          break;
+        }
         console.warn(`audit AI ${model} attempt ${attempt + 1}: ${msg.replace("__TRANSIENT__", "")}`);
         if (attempt === 0) await new Promise((r) => setTimeout(r, 1500));
       }
@@ -784,6 +791,7 @@ async function auditOne(opts: {
   profile?: ScrapeResult | null;
   gig?: ScrapeResult | null;
   accountGigTitles?: string[];
+  performance?: { period?: string; impressions?: number; clicks?: number; orders?: number };
   geminiKey: string;
   timeoutMs?: number;
 }) {
@@ -799,6 +807,14 @@ async function auditOne(opts: {
   const accountServicesBlock = gigTitles.length
     ? `\n=== ALL LIVE GIGS CURRENTLY SET UP ON THIS SAME FIVERR ACCOUNT (${gigTitles.length}) ===\n${gigTitles.map((t, i) => `${i + 1}. ${t}`).join("\n")}\n`
     : "";
+
+  const performance = opts.performance || {};
+  const impressions = Number(performance.impressions) || 0;
+  const clicks = Number(performance.clicks) || 0;
+  const orders = Number(performance.orders) || 0;
+  const performanceBlock = impressions || clicks || orders
+    ? `\n=== SELLER-REPORTED PERFORMANCE (${performance.period || "selected period"}) ===\nImpressions: ${impressions || "not provided"}\nClicks: ${clicks || "not provided"}\nOrders: ${orders || "not provided"}\nCTR: ${impressions > 0 && clicks >= 0 ? `${((clicks / impressions) * 100).toFixed(2)}%` : "not calculable"}\nClick-to-order rate: ${clicks > 0 && orders >= 0 ? `${((orders / clicks) * 100).toFixed(2)}%` : "not calculable"}\n`
+    : "\n=== PERFORMANCE DATA ===\nNo impressions, clicks, or orders were provided. Do not invent performance numbers; mark performance as needing manual confirmation.\n";
 
   const oneProfileRule = target === "PROFILE"
     ? `\n=== ONE PROFILE, MANY GIGS RULE (CRITICAL) ===
@@ -816,7 +832,7 @@ A Fiverr account has ONE profile title/bio/description for the WHOLE account, bu
       ? `\n=== ACCOUNT CONTEXT ===\nThis gig sits on an account that also runs the other gigs listed above. Keep the rewrite distinct from them (no cannibalising the same keyword) while staying inside the same specialty.\n`
       : "";
 
-  const scrapedBlock = `=== LIVE SCRAPED FIVERR CONTENT VIA ${item?.source?.toUpperCase() || "SCRAPER"} (${url}) ===\n${markdown}\n${accountServicesBlock}${oneProfileRule}`;
+  const scrapedBlock = `=== LIVE SCRAPED FIVERR CONTENT VIA ${item?.source?.toUpperCase() || "SCRAPER"} (${url}) ===\n${markdown}\n${performanceBlock}${accountServicesBlock}${oneProfileRule}`;
 
 
   const prompt = `Audit this Fiverr ${target}. Return STRICT JSON ONLY (no fences) in this EXACT shape:
@@ -829,7 +845,7 @@ ${scrapedBlock}
 
 Rules:
 - ACCURACY IS EVERYTHING. Every "problem" you list MUST be provable from the scraped/pasted content above. Quote the exact text you are judging.
-- If a field is NOT visible in the content (e.g. tags, packages, requirements, images), do NOT claim it is missing or bad. Instead say "not visible in the scraped page — verify manually" and mark it severity "low".
+  - If a field is NOT visible in the content (especially tags, packages, requirements, gallery image quality, reviews, response time, or seller level), do NOT claim it is missing or bad. Instead say "not visible in the scraped page — verify manually" and mark it severity "low".
 - Never invent a current title, bio, price, review count or rating. If you did not read it, say so.
 - overall_score must be justified by what you actually read: 0-39 only if the read content is genuinely weak, 40-69 average, 70-100 strong.
 - Be brutally honest, specific, and actionable. No fluff.
@@ -841,6 +857,7 @@ Rules:
 - account_edits = concrete list of "go here → change this" edits inside Fiverr, ordered by priority.
 - ranking_tips = Fiverr-specific SEO/ranking moves (impressions, CTR, response rate, delivery, buyer requests, promoted gigs, video, niche-down).
 - RANKING KEYWORDS ARE MANDATORY: identify the exact buyer-intent search terms real Fiverr buyers type for this service (primary keyword + 2-3 long-tail variants). Front-load the primary keyword in rewrites.gig_title, reuse it naturally in the first 2 lines of rewrites.gig_description, and build rewrites.search_tags/tags from those real search terms (single-service, no broad unrelated words, 5 tags max, lowercase). Name the primary keyword and the long-tails explicitly inside the relevant "reason" fields and in at least 2 ranking_tips so the user knows which terms they are now ranking for.
+  - PERFORMANCE DIAGNOSIS: when seller-reported numbers exist, explain separately whether the bottleneck is visibility (impressions), click-through (clicks divided by impressions), or conversion (orders divided by clicks). Never present seller-reported numbers as Fiverr-verified analytics.
 - 3 image_prompts, each PREMIUM 1280x769, high-CTR, buyer-magnet quality — assume the current thumbnail is weak unless clearly stated otherwise.
 - 5 search tags max, each <20 chars, lowercase.
 - 5–8 critical_issues, mix of severities, each with concrete fix.
@@ -916,19 +933,34 @@ Deno.serve(async (req) => {
     }
 
     const body = await req.json();
-    const profileUrl: string | undefined = normalizeProfileInput(body.profileUrl);
-    const username = getFiverrUsername(profileUrl);
+    const requestedProfileUrl: string | undefined = normalizeProfileInput(body.profileUrl);
     const niche: string | undefined = String(body.niche || "").trim().slice(0, 200) || undefined;
     const pastedProfile: string = String(body.pastedProfile || "").trim().slice(0, 12000);
     const pastedGig: string = String(body.pastedGig || "").trim().slice(0, 12000);
     const issue: string | undefined = String(body.issue || "").trim().slice(0, 2000) || undefined;
-    const gigUrls: string[] = Array.isArray(body.gigUrls)
+    const requestedGigUrls: string[] = Array.isArray(body.gigUrls)
       ? body.gigUrls.map((u: string) => canonicalUrl(u)).filter(Boolean)
       : (body.gigUrl?.trim() ? [canonicalUrl(body.gigUrl.trim())] : []);
+
+    // Resolve Fiverr short links before the account crawl. The actor usually
+    // returns the final gig URL, so matching against the unresolved /s/... URL
+    // was causing a valid scrape to be discarded as "not found".
+    const gigUrls = Array.from(new Set(await Promise.all(requestedGigUrls.map((url) => resolveFiverrUrl(url))))).filter(Boolean);
+    const inferredUsername = gigUrls.map((url) => getFiverrUsername(url)).find(Boolean) || null;
+    const profileUrl: string | undefined = requestedProfileUrl || (inferredUsername ? normalizeProfileInput(inferredUsername) : undefined);
+    const username = getFiverrUsername(profileUrl) || inferredUsername;
 
     if (!profileUrl && gigUrls.length === 0) {
       return new Response(JSON.stringify({ error: "Provide a profile URL and/or one or more gig URLs." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
+
+    const rawPerformance = body.performance && typeof body.performance === "object" ? body.performance : {};
+    const performance = {
+      period: String(rawPerformance.period || "30 days").slice(0, 30),
+      impressions: Math.max(0, Number(String(rawPerformance.impressions || "").replace(/,/g, "")) || 0),
+      clicks: Math.max(0, Number(String(rawPerformance.clicks || "").replace(/,/g, "")) || 0),
+      orders: Math.max(0, Number(String(rawPerformance.orders || "").replace(/,/g, "")) || 0),
+    };
 
     const tokens = await loadApifyTokens(admin, user.id);
     if (tokens.length === 0) {
@@ -961,7 +993,7 @@ Deno.serve(async (req) => {
     // edge worker alive after we immediately return the saved audit ID to the browser.
     // The frontend then polls this row until it becomes complete or error.
     const auditWork = runAuditWork(admin, {
-      profileUrl, username, niche, issue, gigUrls, geminiKey, tokens, auditId, pastedProfile, pastedGig,
+      profileUrl, username, niche, issue, gigUrls, geminiKey, tokens, auditId, pastedProfile, pastedGig, performance,
     }).catch(async (e: any) => {
       console.error("audit work error:", e);
       await admin.from("saved_audits").update({
@@ -994,9 +1026,10 @@ async function runAuditWork(admin: any, opts: {
   profileUrl?: string; username: string | null; niche?: string; issue?: string;
   gigUrls: string[]; geminiKey: string; tokens: ApifyToken[]; auditId: string;
   pastedProfile?: string; pastedGig?: string;
+  performance?: { period?: string; impressions?: number; clicks?: number; orders?: number };
 }) {
   const requestStart = startedAt();
-  const { profileUrl, username, niche, issue, gigUrls, geminiKey, tokens, auditId } = opts;
+  const { profileUrl, username, niche, issue, gigUrls, geminiKey, tokens, auditId, performance } = opts;
   const pastedProfile = (opts.pastedProfile || "").trim();
   const pastedGig = (opts.pastedGig || "").trim();
 
@@ -1048,8 +1081,8 @@ async function runAuditWork(admin: any, opts: {
   ]));
 
   const allRequestedGigUrls = Array.from(new Set([...gigUrls, ...discoveredGigUrls]));
-  const allGigUrls = allRequestedGigUrls.slice(0, 3);
-  const skippedGigs = allRequestedGigUrls.slice(3);
+  const allGigUrls = allRequestedGigUrls.slice(0, 4);
+  const skippedGigs = allRequestedGigUrls.slice(4);
 
   const gigScrapes = await Promise.all(allGigUrls.map(async (url) => {
     const fromCombined = combinedCrawl.find((item) => canonicalUrl(item.url) === canonicalUrl(url));
@@ -1077,7 +1110,7 @@ async function runAuditWork(admin: any, opts: {
 
   const profileAuditPromise = profileUrl
     ? (profileScrape
-      ? auditOne({ niche, issue, profile: profileScrape, accountGigTitles, geminiKey, timeoutMs: 28_000 })
+        ? auditOne({ niche, issue, profile: profileScrape, accountGigTitles, performance, geminiKey, timeoutMs: 28_000 })
           .catch((e: any) => unavailableAudit("PROFILE", profileUrl, `Live Fiverr profile was read but AI generation failed: ${e.message}. Try again in a moment.`))
       : Promise.resolve(unavailableAudit("PROFILE", profileUrl, "Fiverr blocked automated reading of this profile through every available Apify key, Firecrawl, and direct request. Open the profile in a private browser window: if it opens for buyers, paste the exact profile bio into AI Chat and I will audit it line by line.")))
     : Promise.resolve(null);
@@ -1085,7 +1118,7 @@ async function runAuditWork(admin: any, opts: {
   const gigAuditPromises = gigScrapes.map(async (g) => {
     try {
       const audit = g.r
-        ? await auditOne({ niche, issue, gig: g.r, accountGigTitles, geminiKey, timeoutMs: 28_000 })
+        ? await auditOne({ niche, issue, gig: g.r, accountGigTitles, performance, geminiKey, timeoutMs: 28_000 })
             .catch((e: any) => unavailableAudit("GIG", g.url, `Live gig was read but AI generation failed: ${e.message}. Try again in a moment.`))
 
         : unavailableAudit("GIG", g.url, "Fiverr blocked automated reading of this gig through every available Apify key, Firecrawl, and direct request. Confirm the gig is public, then paste its title, description and packages into AI Chat for a manual audit.");
