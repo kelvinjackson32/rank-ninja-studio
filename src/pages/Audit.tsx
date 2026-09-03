@@ -366,7 +366,7 @@ const Audit = () => {
   };
 
   const waitForAudit = async (id: string) => {
-    const deadline = Date.now() + 180_000;
+    const deadline = Date.now() + 300_000;
     while (Date.now() < deadline) {
       await new Promise((resolve) => window.setTimeout(resolve, 2500));
       const { data, error } = await (supabase as any)
@@ -410,7 +410,15 @@ const Audit = () => {
     try {
       const reportedIssue = [issue.trim(), performanceSummary].filter(Boolean).join("\n").slice(0, 2000);
       const { data, error } = await supabase.functions.invoke("audit-account", {
-        body: { profileUrl: parsed.profileUrl, gigUrls: parsed.gigUrls, niche, issue: reportedIssue, pastedGig, pastedProfile },
+        body: {
+          profileUrl: parsed.profileUrl,
+          gigUrls: parsed.gigUrls,
+          niche,
+          issue: reportedIssue,
+          pastedGig,
+          pastedProfile,
+          performance: { period: performancePeriod, impressions, clicks, orders },
+        },
       });
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
