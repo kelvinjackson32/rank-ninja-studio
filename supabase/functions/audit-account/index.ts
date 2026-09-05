@@ -535,9 +535,8 @@ function heuristicAudit(target: "PROFILE" | "GIG", url: string, opts: { niche?: 
       { step: 5, action: "Create a stronger thumbnail and upload it to the gig gallery.", expected_impact: "Improves click-through rate from search results.", time_to_apply: "30 min" },
     ],
     image_prompts: [
-      { slot: "Thumbnail 1", prompt: `Premium 1280x769 Fiverr thumbnail for ${service}, bold centered subject, high contrast clean background, overlay text "PRO RESULTS", brand color accent, professional lighting, mock UI/product visible, sharp bold sans-serif typography, no watermark, top-1% CTR style` },
-      { slot: "Thumbnail 2", prompt: `Premium 1280x769 service thumbnail for ${service}, left-side expert workspace visual, right-side 3-word hook "FAST QUALITY WORK", bright accent color, clean modern layout, realistic deliverable preview, crisp typography, no watermark` },
-      { slot: "Thumbnail 3", prompt: `Premium 1280x769 Fiverr gig image for ${service}, before-and-after result composition, strong focal point, benefit text "READY TO USE", polished professional lighting, high trust design, bold sans-serif text, no watermark` },
+      { slot: "Thumbnail 1", prompt: `Premium 1280x769 Fiverr thumbnail for ${service}, bold centered subject, high contrast clean background, overlay text "READY TO USE", brand color accent, professional lighting, mock UI/product visible, sharp bold sans-serif typography, no guarantees, no watermark, polished high-CTR composition` },
+      { slot: "Thumbnail 2", prompt: `Premium 1280x769 service thumbnail for ${service}, left-side expert workspace visual, right-side 3-word hook "FAST QUALITY WORK", bright accent color, clean modern layout, realistic deliverable preview, crisp typography, no guarantees, no watermark` },
     ],
     source_evidence: verifyEvidence([], null, url, null),
     _scraped: false,
@@ -569,7 +568,7 @@ Rules:
 - overall_score should reflect risk from missing live verification, usually 20-45 unless the URL/niche gives strong clarity.`;
   try {
     const raw = await callAI(prompt, system, opts.geminiKey, opts.timeoutMs || 28_000);
-    const parsed = safeParseJSON(raw);
+    let parsed = safeParseJSON(raw);
     if (parsed) {
       parsed = enforceAuditPackageLimits(parsed);
       parsed._scraped = false;
