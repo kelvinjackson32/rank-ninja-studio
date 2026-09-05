@@ -10,20 +10,26 @@ Deno.serve(async (req) => {
 
   try {
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) {
-      return new Response(JSON.stringify({ error: "LOVABLE_API_KEY not configured" }), {
-        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
     const userClient = createClient(SUPABASE_URL, Deno.env.get("SUPABASE_ANON_KEY")!, {
       global: { headers: { Authorization: req.headers.get("Authorization") || "" } },
     });
+    const admin = createClient(SUPABASE_URL, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     const { data: { user } } = await userClient.auth.getUser();
     if (!user) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), {
         status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const { data: settings } = await admin
+      .from("user_ai_settings")
+      .select("gemini_api_key")
+      .eq("user_id", user.id)
+      .maybeSingle();
+    const geminiKey = String(settings?.gemini_api_key || "").trim();
+    if (!geminiKey) {
+      return new Response(JSON.stringify({ error: "No Gemini API key configured. Open Settings → AI Generation first." }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
@@ -51,40 +57,35 @@ MANDATORY DESIGN RULES (top-converting Fiverr gigs follow ALL of these):
 - Composition: clean grid, generous padding from edges, headline aligned left, visual anchor right. Buyer must understand the offer in under 1 second.
 - Output must look like a PREMIUM, professionally-designed Fiverr thumbnail from a Level 2 / Top Rated seller — not AI-generic, not amateur.`;
 
-    const upstream = await fetch("https://ai.gateway.lovable.dev/v1/images/generations", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "openai/gpt-image-2",
-        prompt: enhancedPrompt,
-         size: size || "1536x1024",
-         quality: "high",
-        n: 1,
-      }),
-    });
-
-    if (upstream.status === 429) {
-      return new Response(JSON.stringify({ error: "AI rate limit. Try again shortly." }), {
-        status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    // Use the user's Gemini key for image generation as well. The first model
+    // is the current native image model; the second keeps older Google AI
+    // Studio keys usable when the first catalog entry is unavailable.
+    const models = ["gemini-2.5-flash-image", "gemini-2.0-flash-exp-image-generation"];
+    let b64 = "";
+    let lastError = "";
+    for (const model of models) {
+      const upstream = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(geminiKey)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: enhancedPrompt }] }],
+          generationConfig: { responseModalities: ["TEXT", "IMAGE"] },
+        }),
       });
+      const responseText = await upstream.text();
+      if (upstream.ok) {
+        const data = JSON.parse(responseText);
+        b64 = data?.candidates?.[0]?.content?.parts?.find((part: any) => part?.inlineData?.data)?.inlineData?.data || "";
+        if (b64) break;
+        lastError = "Gemini returned no image data.";
+      } else {
+        lastError = `Gemini image generation failed (${upstream.status}): ${responseText.slice(0, 250)}`;
+        if (![404, 400].includes(upstream.status)) break;
+      }
     }
-    if (upstream.status === 402) {
-      return new Response(JSON.stringify({ error: "AI credits exhausted. Top up Lovable AI in workspace settings." }), {
-        status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-    if (!upstream.ok) {
-      const txt = await upstream.text();
-      return new Response(JSON.stringify({ error: `Image gen failed: ${txt.slice(0, 300)}` }), {
-        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const data = await upstream.json();
-    const b64 = data?.data?.[0]?.b64_json;
     if (!b64) {
-      return new Response(JSON.stringify({ error: "No image returned" }), {
-        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      return new Response(JSON.stringify({ error: lastError || "No image returned from Gemini." }), {
+        status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
     return new Response(JSON.stringify({ image: `data:image/png;base64,${b64}` }), {
