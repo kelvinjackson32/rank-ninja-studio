@@ -316,6 +316,21 @@ const Audit = () => {
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [loadingSeconds, setLoadingSeconds] = useState(0);
 
+  const generateImprovedImage = async (prompt: string, gigTitle: string) => {
+    try {
+      const { data, error } = await supabase.functions.invoke("generate-thumbnail", { body: { prompt } });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      const link = document.createElement("a");
+      link.href = data.image;
+      link.download = `fiverr-audit-${gigTitle.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 48)}-1280x769.png`;
+      link.click();
+      toast({ title: "Improved gig image ready", description: "The image is formatted for Fiverr at 1280×769." });
+    } catch (error: any) {
+      toast({ title: "Image improvement failed", description: error?.message || "Please try again.", variant: "destructive" });
+    }
+  };
+
   const parsed = useMemo(() => parseLinks(linkInput), [linkInput]);
   const hasTarget = Boolean(parsed.profileUrl || parsed.gigUrls.length || pastedGig.trim() || pastedProfile.trim());
 

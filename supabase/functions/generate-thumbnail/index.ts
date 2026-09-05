@@ -34,16 +34,17 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Fiverr top-seller gig thumbnail formula — proven high-CTR pattern.
+    // Fiverr conversion-focused thumbnail formula. It improves clarity and
+    // click appeal without promising rankings, sales, or guaranteed results.
     const enhancedPrompt = `Create a Fiverr GIG THUMBNAIL (1280x769, landscape 5:3) engineered for maximum click-through and conversions, modeled after the top-selling gigs on Fiverr.
 
 USER BRIEF: ${prompt}
 
 MANDATORY DESIGN RULES (top-converting Fiverr gigs follow ALL of these):
 - Bold, punchy HEADLINE text (3–6 words max), extra-large, ultra-legible even at thumbnail size. Use a strong sans-serif (Poppins/Montserrat/Inter Black). Place it on the LEFT half.
-- Include a strong benefit-driven CALL TO ACTION or promise (e.g. "RANK #1 ON GOOGLE", "10X YOUR SALES", "PRO LOGO IN 24H", "GUARANTEED RESULTS"). No spelling mistakes.
+- Include a clear benefit-driven hook (e.g. "CLEAN BRAND DESIGN", "READY TO USE", "CONTENT THAT CONVERTS", "FAST PROFESSIONAL DELIVERY"). Do not promise rankings, sales, or guaranteed results. No spelling mistakes.
 - High-contrast color palette: deep background (navy, black, dark gradient) with ONE vivid accent (electric yellow, neon green, orange, or hot red) for the headline / CTA. Avoid muddy or pastel colors.
-- Add a small trust badge / ribbon in a corner: "★ TOP RATED", "100% GUARANTEE", "24H DELIVERY", or "PRO SELLER".
+- Add a small factual trust badge / ribbon only when supported by the user brief, such as "24H DELIVERY". Never invent ratings, guarantees, reviews, or seller levels.
 - RIGHT half: a bold visual — realistic product mockup, professional photo of the deliverable, or a confident smiling seller headshot. Sharp, well-lit, professional studio quality.
 - Use depth: subtle drop shadows, soft glow behind the headline, a slight gradient overlay so text pops off the background.
 - Absolutely NO cluttered stock backgrounds, NO watermarks, NO tiny unreadable text, NO Fiverr logo, NO fake reviews.
@@ -56,8 +57,8 @@ MANDATORY DESIGN RULES (top-converting Fiverr gigs follow ALL of these):
       body: JSON.stringify({
         model: "openai/gpt-image-2",
         prompt: enhancedPrompt,
-        size: size || "1536x1024",
-        quality: "high",
+         size: size || "1536x1024",
+         quality: "high",
         n: 1,
       }),
     });
