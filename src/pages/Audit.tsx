@@ -197,7 +197,7 @@ const Rewrites = ({ audit }: { audit: Audit }) => {
   );
 };
 
-const AuditReport = ({ audit }: { audit: Audit }) => (
+const AuditReport = ({ audit, onImproveImage }: { audit: Audit; onImproveImage?: (prompt: string) => void }) => (
   <div className="space-y-5">
     <TopFixes audit={audit} />
     <Rewrites audit={audit} />
@@ -253,7 +253,10 @@ const AuditReport = ({ audit }: { audit: Audit }) => (
               <div key={i} className="border border-border rounded-lg p-3 bg-card/40">
                 <div className="flex items-center justify-between mb-1">
                   <div className="font-semibold text-sm">{ip.slot}</div>
-                  <Button variant="ghost" size="sm" onClick={() => copy(ip.prompt)}><Copy className="w-3.5 h-3.5 mr-1" />Copy</Button>
+                  <div className="flex items-center gap-1">
+                    <Button variant="ghost" size="sm" onClick={() => copy(ip.prompt)}><Copy className="w-3.5 h-3.5 mr-1" />Copy</Button>
+                    {onImproveImage && <Button variant="outline" size="sm" onClick={() => onImproveImage(ip.prompt)}><Sparkles className="w-3.5 h-3.5 mr-1" />Improve image</Button>}
+                  </div>
                 </div>
                 <p className="text-sm text-muted-foreground leading-relaxed">{ip.prompt}</p>
               </div>
@@ -315,6 +318,49 @@ const Audit = () => {
   const [saved, setSaved] = useState<SavedAudit[]>([]);
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [loadingSeconds, setLoadingSeconds] = useState(0);
+
+  const toFiverrImage = (dataUrl: string) => new Promise<string>((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 1280;
+      canvas.height = 769;
+      const context = canvas.getContext("2d");
+      if (!context) { reject(new Error("Image conversion is not available")); return; }
+      const targetRatio = 1280 / 769;
+      const sourceRatio = image.width / image.height;
+      let sx = 0;
+      let sy = 0;
+      let sw = image.width;
+      let sh = image.height;
+      if (sourceRatio > targetRatio) {
+        sw = image.height * targetRatio;
+        sx = (image.width - sw) / 2;
+      } else {
+        sh = image.width / targetRatio;
+        sy = (image.height - sh) / 2;
+      }
+      context.drawImage(image, sx, sy, sw, sh, 0, 0, 1280, 769);
+      resolve(canvas.toDataURL("image/png"));
+    };
+    image.onerror = () => reject(new Error("The generated image could not be read"));
+    image.src = dataUrl;
+  });
+
+  const generateImprovedImage = async (prompt: string, gigTitle: string) => {
+    try {
+      const { data, error } = await supabase.functions.invoke("generate-thumbnail", { body: { prompt } });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      const link = document.createElement("a");
+      link.href = await toFiverrImage(data.image);
+      link.download = `fiverr-audit-${gigTitle.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 48)}-1280x769.png`;
+      link.click();
+      toast({ title: "Improved gig image ready", description: "The image is formatted for Fiverr at 1280×769." });
+    } catch (error: any) {
+      toast({ title: "Image improvement failed", description: error?.message || "Please try again.", variant: "destructive" });
+    }
+  };
 
   const parsed = useMemo(() => parseLinks(linkInput), [linkInput]);
   const hasTarget = Boolean(parsed.profileUrl || parsed.gigUrls.length || pastedGig.trim() || pastedProfile.trim());
@@ -573,7 +619,7 @@ const Audit = () => {
         )}
 
         {/* Results */}
-        {profileAudit && (
+         {profileAudit && (
           <Card className="mb-4 border-secondary/40 surface-card">
             <CardHeader>
               <CardTitle className="text-lg flex items-center justify-between gap-3">
@@ -584,7 +630,7 @@ const Audit = () => {
               </CardTitle>
               <p className="text-sm text-muted-foreground pt-1">{profileAudit.verdict}</p>
             </CardHeader>
-            <CardContent><AuditReport audit={profileAudit} /></CardContent>
+             <CardContent><AuditReport audit={profileAudit} /></CardContent>
           </Card>
         )}
 
@@ -625,7 +671,10 @@ const Audit = () => {
                         <p className="text-sm">{g.audit.verdict}</p>
                         <a href={g.url} target="_blank" rel="noreferrer" className="shrink-0 text-xs text-primary hover:underline flex items-center gap-1"><ExternalLink className="w-3 h-3" /> Open gig</a>
                       </div>
-                      <AuditReport audit={g.audit} />
+                       <AuditReport
+                         audit={g.audit}
+                         onImproveImage={(prompt) => generateImprovedImage(prompt, g.title)}
+                       />
                     </AccordionContent>
                   </AccordionItem>
                 ))}

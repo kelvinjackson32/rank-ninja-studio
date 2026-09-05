@@ -172,7 +172,14 @@ async function resolveFiverrUrl(raw: string, timeoutMs = 5_000): Promise<string>
       signal: AbortSignal.timeout(timeoutMs),
     });
     const location = resp.headers.get("location");
-    return location ? absoluteFiverrUrl(location, normalized) || normalized : normalized;
+    if (location) return absoluteFiverrUrl(location, normalized) || normalized;
+    // Some Fiverr short links return a normal HTML response instead of a
+    // redirect. Read the canonical URL so the later crawl/result matching uses
+    // the real gig URL rather than /s/...
+    const html = await resp.text();
+    const canonical = html.match(/<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/i)?.[1]
+      || html.match(/<meta[^>]+property=["']og:url["'][^>]+content=["']([^"']+)["']/i)?.[1];
+    return canonical ? absoluteFiverrUrl(canonical, normalized) || normalized : normalized;
   } catch {
     return normalized;
   }
@@ -528,9 +535,8 @@ function heuristicAudit(target: "PROFILE" | "GIG", url: string, opts: { niche?: 
       { step: 5, action: "Create a stronger thumbnail and upload it to the gig gallery.", expected_impact: "Improves click-through rate from search results.", time_to_apply: "30 min" },
     ],
     image_prompts: [
-      { slot: "Thumbnail 1", prompt: `Premium 1280x769 Fiverr thumbnail for ${service}, bold centered subject, high contrast clean background, overlay text "PRO RESULTS", brand color accent, professional lighting, mock UI/product visible, sharp bold sans-serif typography, no watermark, top-1% CTR style` },
-      { slot: "Thumbnail 2", prompt: `Premium 1280x769 service thumbnail for ${service}, left-side expert workspace visual, right-side 3-word hook "FAST QUALITY WORK", bright accent color, clean modern layout, realistic deliverable preview, crisp typography, no watermark` },
-      { slot: "Thumbnail 3", prompt: `Premium 1280x769 Fiverr gig image for ${service}, before-and-after result composition, strong focal point, benefit text "READY TO USE", polished professional lighting, high trust design, bold sans-serif text, no watermark` },
+      { slot: "Thumbnail 1", prompt: `Premium 1280x769 Fiverr thumbnail for ${service}, bold centered subject, high contrast clean background, overlay text "READY TO USE", brand color accent, professional lighting, mock UI/product visible, sharp bold sans-serif typography, no guarantees, no watermark, polished high-CTR composition` },
+      { slot: "Thumbnail 2", prompt: `Premium 1280x769 service thumbnail for ${service}, left-side expert workspace visual, right-side 3-word hook "FAST QUALITY WORK", bright accent color, clean modern layout, realistic deliverable preview, crisp typography, no guarantees, no watermark` },
     ],
     source_evidence: verifyEvidence([], null, url, null),
     _scraped: false,
@@ -554,7 +560,7 @@ User-reported problem: ${opts.issue || "low impressions, low clicks, no orders"}
 
 Rules:
 - Be honest: include one high-priority issue that says the live Fiverr page could not be fully verified, so the user must confirm public visibility and paste exact text for a deeper line-by-line review.
-- Still provide a strong NEW gig title, gig description, profile description, buyer requirements, search tags, packages, account edits, ranking tips, action plan, and 3 premium 1280x769 thumbnail prompts.
+  - Still provide a strong NEW gig title, gig description, profile description, buyer requirements, search tags, packages, account edits, ranking tips, action plan, and 2 premium 1280x769 thumbnail prompts.
 - Do NOT leave rewrites empty. Make them specific to the likely service/niche.
 - rewrites.gig_title must be <= 80 chars and must not copy the raw URL slug word-for-word.
 - rewrites.gig_description must be about the gig service. rewrites.profile_description must be about the seller bio. Keep them different.
@@ -562,8 +568,9 @@ Rules:
 - overall_score should reflect risk from missing live verification, usually 20-45 unless the URL/niche gives strong clarity.`;
   try {
     const raw = await callAI(prompt, system, opts.geminiKey, opts.timeoutMs || 28_000);
-    const parsed = safeParseJSON(raw);
+    let parsed = safeParseJSON(raw);
     if (parsed) {
+      parsed = enforceAuditPackageLimits(parsed);
       parsed._scraped = false;
       parsed._source = "fallback";
       parsed._url = url;
@@ -696,6 +703,19 @@ function safeParseJSON(raw: string): any {
   }
 }
 
+function enforceAuditPackageLimits(audit: any) {
+  const packages = audit?.rewrites?.packages?.improved;
+  if (!Array.isArray(packages)) return audit;
+  audit.rewrites.packages.improved = packages.map((pkg: any) => ({
+    ...pkg,
+    name: typeof pkg?.name === "string" ? pkg.name.slice(0, 100) : pkg?.name,
+    includes: Array.isArray(pkg?.includes)
+      ? pkg.includes.map((item: any) => typeof item === "string" ? item.slice(0, 100) : item)
+      : pkg?.includes,
+  }));
+  return audit;
+}
+
 const AUDIT_SHAPE = `{
   "overall_score": <0-100>,
   "verdict": "<one-sentence diagnosis>",
@@ -708,8 +728,8 @@ const AUDIT_SHAPE = `{
     "gig_title": { "current": "...", "improved": "<NEW perfect Fiverr gig title, <= 80 chars, keyword-front-loaded, buyer-intent, high-CTR>", "reason": "..." },
     "tags": { "current": ["..."], "improved": ["..."], "reason": "..." },
     "search_tags": { "improved": ["..."], "reason": "..." },
-    "gig_description": { "current_snippet": "...", "improved": "<NEW gig-specific description, 1000-1200 chars, 5 sections: ABOUT THIS GIG / WHAT YOU GET / WHY CHOOSE ME / MY PROCESS / READY TO ORDER (CTA). Use line breaks and ✅ sparingly. Must be about the GIG offering, NOT the seller bio.>", "reason": "..." },
-    "profile_description": { "current_snippet": "...", "improved": "<NEW profile bio, 600-900 chars, first-person, hooks in first line, positions the SELLER (skills, experience, results), ends with CTA to order. Different from the gig description.>", "reason": "..." },
+  "gig_description": { "current_snippet": "...", "improved": "<NEW gig-specific description, 1000-1200 chars, 5 sections: ABOUT THIS GIG / WHAT YOU GET / WHY CHOOSE ME / MY PROCESS / READY TO ORDER (CTA). Use line breaks and ✅ sparingly. Must be about the GIG offering, NOT the seller bio.>", "reason": "..." },
+  "profile_description": { "current_snippet": "...", "improved": "<NEW profile bio, maximum 500 chars, first-person, hooks in first line, positions the SELLER (skills, experience, results), ends with CTA to order. Different from the gig description.>", "reason": "..." },
     "buyer_requirements": { "improved": ["<clear question 1 to ask the buyer before starting>", "<question 2>", "<question 3>", "<question 4>", "<question 5>"], "reason": "why these requirements reduce revisions and speed delivery" },
     "packages": { "improved": [{ "name": "Basic|Standard|Premium", "price": 0, "delivery_days": 0, "revisions": 0, "includes": ["..."] }], "reason": "..." }
   },
@@ -721,7 +741,7 @@ const AUDIT_SHAPE = `{
   "source_evidence": [
     { "field": "Gig Title|Search Tags|Gig Description|Profile Bio|Packages/Pricing|Buyer Requirements|Gallery/Images|Reviews & Ratings|Response Time|Seller Level", "used_for": "<which check(s) this field fed>", "quote": "<EXACT text copied from the scraped content above, or empty string if the field was not readable>", "status": "verified|needs_manual_confirmation", "note": "<why it is verified, or what the user must confirm on Fiverr>" }
   ],
-  "image_prompts": [{ "slot": "Thumbnail 1|2|3", "prompt": "<PREMIUM 1280x769 Fiverr gig thumbnail prompt. Must include: bold subject centered/left, high contrast background, 2-4 word overlay hook, brand color accent, professional lighting, mock UI or product visible, buyer-benefit-driven text, no watermark, sharp typography (bold sans-serif). Optimized for top-1% CTR>" }]
+  "image_prompts": [{ "slot": "Thumbnail 1|2", "prompt": "<PREMIUM 1280x769 Fiverr gig thumbnail prompt. Must include: bold subject centered/left, high contrast background, 2-4 word overlay hook, brand color accent, professional lighting, mock UI or product visible, buyer-benefit-driven text, no guarantees, no watermark, sharp typography (bold sans-serif). Optimized for high CTR>" }]
 }`;
 
 const EVIDENCE_FIELDS = [
@@ -858,7 +878,7 @@ Rules:
 - ranking_tips = Fiverr-specific SEO/ranking moves (impressions, CTR, response rate, delivery, buyer requests, promoted gigs, video, niche-down).
 - RANKING KEYWORDS ARE MANDATORY: identify the exact buyer-intent search terms real Fiverr buyers type for this service (primary keyword + 2-3 long-tail variants). Front-load the primary keyword in rewrites.gig_title, reuse it naturally in the first 2 lines of rewrites.gig_description, and build rewrites.search_tags/tags from those real search terms (single-service, no broad unrelated words, 5 tags max, lowercase). Name the primary keyword and the long-tails explicitly inside the relevant "reason" fields and in at least 2 ranking_tips so the user knows which terms they are now ranking for.
   - PERFORMANCE DIAGNOSIS: when seller-reported numbers exist, explain separately whether the bottleneck is visibility (impressions), click-through (clicks divided by impressions), or conversion (orders divided by clicks). Never present seller-reported numbers as Fiverr-verified analytics.
-- 3 image_prompts, each PREMIUM 1280x769, high-CTR, buyer-magnet quality — assume the current thumbnail is weak unless clearly stated otherwise.
+  - Exactly 2 image_prompts, each PREMIUM 1280x769, high-CTR, buyer-magnet quality — assume the current thumbnail is weak unless clearly stated otherwise.
 - 5 search tags max, each <20 chars, lowercase.
 - 5–8 critical_issues, mix of severities, each with concrete fix.
 - 3–6 action_plan steps, ordered by impact, with realistic time estimates.
@@ -903,7 +923,8 @@ Keep this compact so the JSON is complete: 3 critical issues, 3 action-plan step
   }
   parsed._scraped = scraped;
   parsed._source = item?.source || null;
-  parsed.source_evidence = verifyEvidence(parsed.source_evidence, markdown, url, item?.source || null);
+      parsed = enforceAuditPackageLimits(parsed);
+      parsed.source_evidence = verifyEvidence(parsed.source_evidence, markdown, url, item?.source || null);
   return parsed;
 }
 
