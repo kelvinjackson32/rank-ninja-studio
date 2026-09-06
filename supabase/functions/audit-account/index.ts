@@ -1155,6 +1155,11 @@ async function runAuditWork(admin: any, opts: {
   const gigScrapes = await Promise.all(allGigUrls.map(async (url) => {
     const fromCombined = combinedCrawl.find((item) => canonicalUrl(item.url) === canonicalUrl(url));
     let r = fromCombined || await scrapeWithoutApify(url, 11_000);
+    // Fiverr answers blocked/short links with the generic marketplace homepage.
+    // Auditing that page produced nonsense like "this is the Fiverr homepage",
+    // so treat it as a failed read instead of real gig content.
+    if (r && isFiverrHomepageContent(r)) r = null;
+
     if (pastedGig && canonicalUrl(url) === canonicalUrl(allGigUrls[0])) {
       r = {
         url: r?.url || url,
