@@ -1205,7 +1205,10 @@ async function runAuditWork(admin: any, opts: {
         ? await auditOne({ niche, issue, gig: g.r, accountGigTitles, performance, geminiKey, timeoutMs: 28_000 })
             .catch((e: any) => unavailableAudit("GIG", g.url, `Live gig was read but AI generation failed: ${e.message}. Try again in a moment.`))
 
-        : unavailableAudit("GIG", g.url, "Fiverr blocked automated reading of this gig through every available Apify key, Firecrawl, and direct request. Confirm the gig is public, then paste its title, description and packages into AI Chat for a manual audit.");
+        : unavailableAudit("GIG", g.url, g.url.includes("/s/")
+          ? "This is a Fiverr share link (fiverr.com/s/...) and Fiverr would not open it for the scanner — it returned the marketplace homepage instead of your gig. Open the gig in your browser and paste the full link (it looks like fiverr.com/username/i-will-...), then run the audit again."
+          : "Fiverr blocked automated reading of this gig through every available Apify key, Firecrawl, and direct request. Confirm the gig is public, then paste its title, description and packages into AI Chat for a manual audit.");
+
       const title = g.r?.metadata?.title || g.url.split("/").pop() || g.url;
       return { url: g.url, title, audit };
     } catch (e: any) {
