@@ -157,7 +157,18 @@ function htmlToText(html: string): string {
     .trim();
 }
 
+function isFiverrHomepageContent(r: { url?: string; markdown?: string; metadata?: any } | null): boolean {
+  if (!r) return false;
+  if (r.url && isFiverrHomepageUrl(r.url)) return true;
+  const title = String(r.metadata?.title || "");
+  const head = (r.markdown || "").slice(0, 1500);
+  const genericTitle = /Freelance services marketplace|Find top global talent|Fiverr Pro/i.test(title);
+  const hasGigContent = /\bI will\b/i.test(head) || /About this gig/i.test(r.markdown || "");
+  return genericTitle && !hasGigContent;
+}
+
 function isFiverrHomepageUrl(raw: string): boolean {
+
   try {
     const u = new URL(canonicalUrl(raw));
     return u.hostname.replace(/^www\./, "") === "fiverr.com" && (u.pathname === "" || u.pathname === "/");
