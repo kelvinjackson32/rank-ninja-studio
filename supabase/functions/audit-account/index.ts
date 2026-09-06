@@ -157,6 +157,41 @@ function htmlToText(html: string): string {
     .trim();
 }
 
+function isFiverrHomepageContent(r: { url?: string; markdown?: string; metadata?: any } | null): boolean {
+  if (!r) return false;
+  if (r.url && isFiverrHomepageUrl(r.url)) return true;
+  const title = String(r.metadata?.title || "");
+  const head = (r.markdown || "").slice(0, 1500);
+  const genericTitle = /Freelance services marketplace|Find top global talent|Fiverr Pro/i.test(title);
+  const hasGigContent = /\bI will\b/i.test(head) || /About this gig/i.test(r.markdown || "");
+  return genericTitle && !hasGigContent;
+}
+
+function isFiverrHomepageUrl(raw: string): boolean {
+
+  try {
+    const u = new URL(canonicalUrl(raw));
+    return u.hostname.replace(/^www\./, "") === "fiverr.com" && (u.pathname === "" || u.pathname === "/");
+  } catch {
+    return true;
+  }
+}
+
+// A short link only counts as "resolved" when it lands on a real gig/profile page.
+// Fiverr's bot wall answers /s/... with the generic homepage (og:url = fiverr.com),
+// which previously made the audit review the marketplace homepage instead of the gig.
+function usefulResolvedUrl(candidate: string): string | null {
+  const url = absoluteFiverrUrl(candidate);
+  if (!url || isFiverrHomepageUrl(url)) return null;
+  try {
+    const path = new URL(url).pathname.replace(/^\/+/, "");
+    if (!path || path.startsWith("s/") || /^(categories|search|start_selling|login|signup)(\/|$)/i.test(path)) return null;
+  } catch {
+    return null;
+  }
+  return url;
+}
+
 async function resolveFiverrUrl(raw: string, timeoutMs = 5_000): Promise<string> {
   const normalized = canonicalUrl(raw);
   try {
@@ -172,18 +207,41 @@ async function resolveFiverrUrl(raw: string, timeoutMs = 5_000): Promise<string>
       signal: AbortSignal.timeout(timeoutMs),
     });
     const location = resp.headers.get("location");
-    if (location) return absoluteFiverrUrl(location, normalized) || normalized;
-    // Some Fiverr short links return a normal HTML response instead of a
-    // redirect. Read the canonical URL so the later crawl/result matching uses
-    // the real gig URL rather than /s/...
-    const html = await resp.text();
-    const canonical = html.match(/<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/i)?.[1]
-      || html.match(/<meta[^>]+property=["']og:url["'][^>]+content=["']([^"']+)["']/i)?.[1];
-    return canonical ? absoluteFiverrUrl(canonical, normalized) || normalized : normalized;
+    const fromRedirect = location ? usefulResolvedUrl(location) : null;
+    if (fromRedirect) return fromRedirect;
+
+    if (resp.ok) {
+      const html = await resp.text();
+      const candidates = [
+        html.match(/<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/i)?.[1],
+        html.match(/<meta[^>]+property=["']og:url["'][^>]+content=["']([^"']+)["']/i)?.[1],
+      ].filter(Boolean) as string[];
+      for (const candidate of candidates) {
+        const resolved = usefulResolvedUrl(candidate);
+        if (resolved) return resolved;
+      }
+    } else {
+      await resp.body?.cancel();
+    }
   } catch {
-    return normalized;
+    // fall through to the rendered-browser resolver below
   }
+
+  // Direct requests to /s/ links are usually bot-blocked, so ask Firecrawl to
+  // render the redirect and report the final gig URL.
+  try {
+    const rendered = await firecrawlScrape(normalized, Math.min(12_000, timeoutMs * 3));
+    const meta: any = rendered?.metadata || {};
+    for (const candidate of [meta.url, meta.ogUrl, meta["og:url"], meta.canonicalUrl, meta.sourceURL]) {
+      const resolved = typeof candidate === "string" ? usefulResolvedUrl(candidate) : null;
+      if (resolved) return resolved;
+    }
+  } catch {
+    // keep the short link; the browser crawler can still follow it
+  }
+  return normalized;
 }
+
 
 async function directFiverrScrape(url: string, timeoutMs = 8_000): Promise<ScrapeResult | null> {
   const normalized = canonicalUrl(url);
@@ -1108,6 +1166,11 @@ async function runAuditWork(admin: any, opts: {
   const gigScrapes = await Promise.all(allGigUrls.map(async (url) => {
     const fromCombined = combinedCrawl.find((item) => canonicalUrl(item.url) === canonicalUrl(url));
     let r = fromCombined || await scrapeWithoutApify(url, 11_000);
+    // Fiverr answers blocked/short links with the generic marketplace homepage.
+    // Auditing that page produced nonsense like "this is the Fiverr homepage",
+    // so treat it as a failed read instead of real gig content.
+    if (r && isFiverrHomepageContent(r)) r = null;
+
     if (pastedGig && canonicalUrl(url) === canonicalUrl(allGigUrls[0])) {
       r = {
         url: r?.url || url,
@@ -1142,7 +1205,10 @@ async function runAuditWork(admin: any, opts: {
         ? await auditOne({ niche, issue, gig: g.r, accountGigTitles, performance, geminiKey, timeoutMs: 28_000 })
             .catch((e: any) => unavailableAudit("GIG", g.url, `Live gig was read but AI generation failed: ${e.message}. Try again in a moment.`))
 
-        : unavailableAudit("GIG", g.url, "Fiverr blocked automated reading of this gig through every available Apify key, Firecrawl, and direct request. Confirm the gig is public, then paste its title, description and packages into AI Chat for a manual audit.");
+        : unavailableAudit("GIG", g.url, g.url.includes("/s/")
+          ? "This is a Fiverr share link (fiverr.com/s/...) and Fiverr would not open it for the scanner — it returned the marketplace homepage instead of your gig. Open the gig in your browser and paste the full link (it looks like fiverr.com/username/i-will-...), then run the audit again."
+          : "Fiverr blocked automated reading of this gig through every available Apify key, Firecrawl, and direct request. Confirm the gig is public, then paste its title, description and packages into AI Chat for a manual audit.");
+
       const title = g.r?.metadata?.title || g.url.split("/").pop() || g.url;
       return { url: g.url, title, audit };
     } catch (e: any) {
