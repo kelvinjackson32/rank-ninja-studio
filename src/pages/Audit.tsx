@@ -520,8 +520,14 @@ const Audit = () => {
                 placeholder={"https://www.fiverr.com/yourusername\nhttps://www.fiverr.com/yourusername/gig-slug"}
                 className="font-mono text-sm"
               />
+              {/[?/]s\//.test(linkInput) && (
+                <p className="mt-2 text-xs text-amber-400">
+                  Share links (fiverr.com/s/…) are often refused by Fiverr and come back as the homepage. Open the gig in your browser and paste the full link for an accurate audit.
+                </p>
+              )}
               <div className="flex flex-wrap items-center gap-2 mt-2 text-xs text-muted-foreground">
                 <span>Profile link, gig links, or just your username — one per line.</span>
+
                 {parsed.profileUrl && (
                   <Badge variant="outline" className="bg-secondary/10 text-secondary border-secondary/30"><User className="w-3 h-3 mr-1" />1 profile</Badge>
                 )}
