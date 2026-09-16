@@ -357,15 +357,22 @@ async function apifyCrawl(
       const results = items
         .map((item: any): ScrapeResult => {
           const metadata = item?.metadata || {};
-          const url = canonicalUrl(item?.url || item?.loadedUrl || item?.sourceUrl || metadata.sourceURL || "");
+          const requested = canonicalUrl(item?.url || item?.sourceUrl || metadata.sourceURL || item?.crawl?.referrerUrl || "");
+          // The browser follows fiverr.com/s/... redirects, so the REAL page URL lives in
+          // crawl.loadedUrl / canonicalUrl. Using the start URL made short-link gigs look
+          // like the marketplace homepage and broke matching later on.
+          const finalUrl = canonicalUrl(
+            item?.crawl?.loadedUrl || item?.loadedUrl || metadata.canonicalUrl || metadata.ogUrl || requested,
+          );
           return {
-            url,
+            url: finalUrl || requested,
+            requestedUrl: requested || undefined,
             markdown: extractApifyMarkdown(item).slice(0, 20000),
             metadata: { ...metadata, links: item?.links || item?.urls || metadata.links || [] },
             source: "apify" as const,
           };
         })
-        .filter((item: ScrapeResult) => item.url && looksUsable(item.markdown));
+        .filter((item: ScrapeResult) => item.url && looksUsable(item.markdown) && !isFiverrHomepageContent(item));
 
       if (results.length > 0) {
         if (opts.admin) await markApifyKey(opts.admin, t.id, "active");
