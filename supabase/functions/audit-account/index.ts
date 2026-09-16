@@ -1278,6 +1278,7 @@ async function runAuditWork(admin: any, opts: {
   const { error: saveError } = await admin.from("saved_audits").update({
     profile_audit: profileAudit,
     gig_audits: ranked,
+    gig_urls: allGigUrls,
     failed_gigs: failedGigs,
     blocked_note: blockedNote,
     status: "complete",
