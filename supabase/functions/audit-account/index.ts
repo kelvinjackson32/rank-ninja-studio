@@ -1163,17 +1163,34 @@ async function runAuditWork(admin: any, opts: {
       }
     : null;
 
+  // The browser run follows fiverr.com/s/... share links, so swap every share link for
+  // the real gig URL it landed on. Without this the audit matched nothing and fell back
+  // to generic marketplace content instead of the gig the user pasted.
+  const resolvedFromCrawl = new Map<string, string>();
+  for (const item of combinedCrawl) {
+    const from = canonicalUrl(item.requestedUrl || "");
+    const to = canonicalUrl(item.url || "");
+    if (from && to && from !== to) resolvedFromCrawl.set(from, to);
+  }
+  const resolvedGigUrls = Array.from(new Set(
+    gigUrls.map((u) => resolvedFromCrawl.get(canonicalUrl(u)) || canonicalUrl(u)).filter(Boolean),
+  ));
+  const effectiveUsername = username || resolvedGigUrls.map((u) => getFiverrUsername(u)).find(Boolean) || null;
+
   const discoveredGigUrls = Array.from(new Set([
-    ...extractGigUrlsFromScrape(profileScrape, username),
-    ...combinedCrawl.filter((item) => isLikelyGigUrl(item.url, username)).map((item) => canonicalUrl(item.url)),
+    ...extractGigUrlsFromScrape(profileScrape, effectiveUsername),
+    ...combinedCrawl.filter((item) => isLikelyGigUrl(item.url, effectiveUsername)).map((item) => canonicalUrl(item.url)),
   ]));
 
-  const allRequestedGigUrls = Array.from(new Set([...gigUrls, ...discoveredGigUrls]));
+  const allRequestedGigUrls = Array.from(new Set([...resolvedGigUrls, ...discoveredGigUrls]));
   const allGigUrls = allRequestedGigUrls.slice(0, 4);
   const skippedGigs = allRequestedGigUrls.slice(4);
 
   const gigScrapes = await Promise.all(allGigUrls.map(async (url) => {
-    const fromCombined = combinedCrawl.find((item) => canonicalUrl(item.url) === canonicalUrl(url));
+    const target = canonicalUrl(url);
+    const fromCombined = combinedCrawl.find((item) =>
+      canonicalUrl(item.url) === target || canonicalUrl(item.requestedUrl || "") === target
+    );
     let r = fromCombined || await scrapeWithoutApify(url, 11_000);
     // Fiverr answers blocked/short links with the generic marketplace homepage.
     // Auditing that page produced nonsense like "this is the Fiverr homepage",
