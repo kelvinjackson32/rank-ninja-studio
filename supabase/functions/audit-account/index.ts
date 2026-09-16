@@ -7,6 +7,8 @@ const corsHeaders = {
 
 type ScrapeResult = {
   url: string;
+  /** URL we asked for (a fiverr.com/s/... share link stays here after redirect resolution). */
+  requestedUrl?: string;
   markdown: string;
   metadata: any;
   source: "direct" | "apify" | "firecrawl";
