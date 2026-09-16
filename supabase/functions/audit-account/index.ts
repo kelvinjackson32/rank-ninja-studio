@@ -7,6 +7,8 @@ const corsHeaders = {
 
 type ScrapeResult = {
   url: string;
+  /** URL we asked for (a fiverr.com/s/... share link stays here after redirect resolution). */
+  requestedUrl?: string;
   markdown: string;
   metadata: any;
   source: "direct" | "apify" | "firecrawl";
@@ -355,15 +357,22 @@ async function apifyCrawl(
       const results = items
         .map((item: any): ScrapeResult => {
           const metadata = item?.metadata || {};
-          const url = canonicalUrl(item?.url || item?.loadedUrl || item?.sourceUrl || metadata.sourceURL || "");
+          const requested = canonicalUrl(item?.url || item?.sourceUrl || metadata.sourceURL || item?.crawl?.referrerUrl || "");
+          // The browser follows fiverr.com/s/... redirects, so the REAL page URL lives in
+          // crawl.loadedUrl / canonicalUrl. Using the start URL made short-link gigs look
+          // like the marketplace homepage and broke matching later on.
+          const finalUrl = canonicalUrl(
+            item?.crawl?.loadedUrl || item?.loadedUrl || metadata.canonicalUrl || metadata.ogUrl || requested,
+          );
           return {
-            url,
+            url: finalUrl || requested,
+            requestedUrl: requested || undefined,
             markdown: extractApifyMarkdown(item).slice(0, 20000),
             metadata: { ...metadata, links: item?.links || item?.urls || metadata.links || [] },
             source: "apify" as const,
           };
         })
-        .filter((item: ScrapeResult) => item.url && looksUsable(item.markdown));
+        .filter((item: ScrapeResult) => item.url && looksUsable(item.markdown) && !isFiverrHomepageContent(item));
 
       if (results.length > 0) {
         if (opts.admin) await markApifyKey(opts.admin, t.id, "active");
@@ -1154,17 +1163,34 @@ async function runAuditWork(admin: any, opts: {
       }
     : null;
 
+  // The browser run follows fiverr.com/s/... share links, so swap every share link for
+  // the real gig URL it landed on. Without this the audit matched nothing and fell back
+  // to generic marketplace content instead of the gig the user pasted.
+  const resolvedFromCrawl = new Map<string, string>();
+  for (const item of combinedCrawl) {
+    const from = canonicalUrl(item.requestedUrl || "");
+    const to = canonicalUrl(item.url || "");
+    if (from && to && from !== to) resolvedFromCrawl.set(from, to);
+  }
+  const resolvedGigUrls = Array.from(new Set(
+    gigUrls.map((u) => resolvedFromCrawl.get(canonicalUrl(u)) || canonicalUrl(u)).filter(Boolean),
+  ));
+  const effectiveUsername = username || resolvedGigUrls.map((u) => getFiverrUsername(u)).find(Boolean) || null;
+
   const discoveredGigUrls = Array.from(new Set([
-    ...extractGigUrlsFromScrape(profileScrape, username),
-    ...combinedCrawl.filter((item) => isLikelyGigUrl(item.url, username)).map((item) => canonicalUrl(item.url)),
+    ...extractGigUrlsFromScrape(profileScrape, effectiveUsername),
+    ...combinedCrawl.filter((item) => isLikelyGigUrl(item.url, effectiveUsername)).map((item) => canonicalUrl(item.url)),
   ]));
 
-  const allRequestedGigUrls = Array.from(new Set([...gigUrls, ...discoveredGigUrls]));
+  const allRequestedGigUrls = Array.from(new Set([...resolvedGigUrls, ...discoveredGigUrls]));
   const allGigUrls = allRequestedGigUrls.slice(0, 4);
   const skippedGigs = allRequestedGigUrls.slice(4);
 
   const gigScrapes = await Promise.all(allGigUrls.map(async (url) => {
-    const fromCombined = combinedCrawl.find((item) => canonicalUrl(item.url) === canonicalUrl(url));
+    const target = canonicalUrl(url);
+    const fromCombined = combinedCrawl.find((item) =>
+      canonicalUrl(item.url) === target || canonicalUrl(item.requestedUrl || "") === target
+    );
     let r = fromCombined || await scrapeWithoutApify(url, 11_000);
     // Fiverr answers blocked/short links with the generic marketplace homepage.
     // Auditing that page produced nonsense like "this is the Fiverr homepage",
@@ -1252,6 +1278,7 @@ async function runAuditWork(admin: any, opts: {
   const { error: saveError } = await admin.from("saved_audits").update({
     profile_audit: profileAudit,
     gig_audits: ranked,
+    gig_urls: allGigUrls,
     failed_gigs: failedGigs,
     blocked_note: blockedNote,
     status: "complete",
