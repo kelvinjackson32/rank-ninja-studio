@@ -151,11 +151,11 @@ const TopFixes = ({ audit }: { audit: Audit }) => {
   );
 };
 
-const Rewrites = ({ audit }: { audit: Audit }) => {
+const Rewrites = ({ audit, title = "Ready-to-paste rewrites" }: { audit: Audit; title?: string }) => {
   const r = audit.rewrites;
   if (!r) return null;
   return (
-    <Section title="Ready-to-paste rewrites" icon={Pencil}>
+    <Section title={title} icon={Pencil}>
       <div className="space-y-2">
         {r.gig_title?.improved && <RewriteBlock label="Gig title (new)" current={r.gig_title.current} improved={r.gig_title.improved} reason={r.gig_title.reason} />}
         {r.gig_description?.improved && <RewriteBlock label="Gig description" current={r.gig_description.current_snippet} improved={r.gig_description.improved} reason={r.gig_description.reason} />}
@@ -197,12 +197,8 @@ const Rewrites = ({ audit }: { audit: Audit }) => {
   );
 };
 
-const AuditReport = ({ audit, onImproveImage }: { audit: Audit; onImproveImage?: (prompt: string) => void }) => (
-  <div className="space-y-5">
-    <TopFixes audit={audit} />
-    <Rewrites audit={audit} />
-
-    <Accordion type="multiple" className="space-y-2">
+const AuditDetails = ({ audit, onImproveImage }: { audit: Audit; onImproveImage?: (prompt: string) => void }) => (
+  <Accordion type="multiple" className="space-y-2">
       {audit.account_edits && audit.account_edits.length > 0 && (
         <AccordionItem value="edits" className="border border-border rounded-lg bg-card/30 px-3">
           <AccordionTrigger className="text-sm font-semibold hover:no-underline py-3">
@@ -295,8 +291,57 @@ const AuditReport = ({ audit, onImproveImage }: { audit: Audit; onImproveImage?:
           </AccordionContent>
         </AccordionItem>
       ) : null}
-    </Accordion>
+  </Accordion>
+);
+
+const AuditReport = ({ audit, onImproveImage }: { audit: Audit; onImproveImage?: (prompt: string) => void }) => (
+  <div className="space-y-5">
+    <TopFixes audit={audit} />
+    <Rewrites audit={audit} />
+    <AuditDetails audit={audit} onImproveImage={onImproveImage} />
   </div>
+);
+
+/** Keeps every gig's diagnosis and copy fixes together instead of mixing them across the page. */
+const GigAuditReport = ({ gig, onImproveImage }: { gig: RankedGig; onImproveImage: (prompt: string) => void }) => (
+  <Accordion type="multiple" defaultValue={["corrections", "rewrites"]} className="space-y-2">
+    <AccordionItem value="corrections" className="border border-destructive/25 rounded-lg bg-destructive/5 px-3">
+      <AccordionTrigger className="hover:no-underline py-3 text-left">
+        <span className="flex items-center gap-2 text-sm font-semibold">
+          <Wrench className="w-4 h-4 text-destructive" />
+          Corrections for this gig
+          <span className="text-xs font-normal text-muted-foreground">({gig.audit.critical_issues?.length || 0} findings)</span>
+        </span>
+      </AccordionTrigger>
+      <AccordionContent className="pb-4">
+        <TopFixes audit={gig.audit} />
+      </AccordionContent>
+    </AccordionItem>
+
+    <AccordionItem value="rewrites" className="border border-primary/25 rounded-lg bg-primary/5 px-3">
+      <AccordionTrigger className="hover:no-underline py-3 text-left">
+        <span className="flex items-center gap-2 text-sm font-semibold">
+          <Pencil className="w-4 h-4 text-primary" />
+          Ready-to-paste rewrite for this gig
+        </span>
+      </AccordionTrigger>
+      <AccordionContent className="pb-4">
+        <Rewrites audit={gig.audit} title="This gig's rewrites" />
+      </AccordionContent>
+    </AccordionItem>
+
+    <AccordionItem value="details" className="border border-border rounded-lg bg-card/30 px-3">
+      <AccordionTrigger className="hover:no-underline py-3 text-left">
+        <span className="flex items-center gap-2 text-sm font-semibold">
+          <ClipboardList className="w-4 h-4 text-secondary" />
+          More checks for this gig
+        </span>
+      </AccordionTrigger>
+      <AccordionContent className="pb-4">
+        <AuditDetails audit={gig.audit} onImproveImage={onImproveImage} />
+      </AccordionContent>
+    </AccordionItem>
+  </Accordion>
 );
 
 const Audit = () => {
